@@ -22,6 +22,12 @@
 | Rai | RAI Reviewer | .squad/agents/Rai/charter.md | 🛡️ RAI |
 | Fact Checker | Fact Checker | .squad/agents/fact-checker/charter.md | 🔍 Verifier |
 
+## Human Members
+
+| Name | Role | Status |
+|------|------|--------|
+| Benoit | Product Owner | 👤 Human |
+
 
 ## Coding Agent
 

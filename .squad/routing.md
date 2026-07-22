@@ -6,6 +6,7 @@ How to decide who handles what.
 
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
+| Product direction | Benoit | Product goals, user priorities, acceptance decisions |
 | Architecture and scope | Morpheus | System design, interfaces, priorities, technical trade-offs |
 | Python application | Trinity | Python services, APIs, data flow, model integration |
 | Generative media | Neo | Image generation, prompting, model evaluation, visual quality |
@@ -41,3 +42,4 @@ How to decide who handles what.
 5. **"Team, ..." → fan-out.** Spawn all relevant agents in parallel as `mode: "background"`.
 6. **Anticipate downstream work.** If a feature is being built, spawn the tester to write test cases from requirements simultaneously.
 7. **Issue-labeled work** — when a `squad:{member}` label is applied to an issue, route to that member. The Lead handles all `squad` (base label) triage.
+8. **Human routing** — Benoit is not spawnable. Present Product Owner decisions to Benoit through the user and continue independent work while awaiting input.
