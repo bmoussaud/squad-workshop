@@ -50,10 +50,8 @@ This repository includes a development container that prepares the core workshop
 The initial application is a provider-neutral, in-memory generation path. It requires Python 3.11 or newer and has no runtime dependencies.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-fantasy-card "Ember Sentinel" "A knight made of living flame"
+uv sync
+uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
 ```
 
 The command prints a completed job record with correlation, idempotency, generator provenance, and artifact metadata. The in-memory generator creates a text demonstration artifact; no image provider or Azure service has been selected.
@@ -61,5 +59,5 @@ The command prints a completed job record with correlation, idempotency, generat
 Run the tests with:
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
+uv run python -m unittest discover -s tests -v
 ```
