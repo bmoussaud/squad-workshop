@@ -10,6 +10,10 @@ Start with synchronous orchestration only while measurements support it. Keep th
 
 This recommendation is conditional on the assumptions below. It is not a claim that Container Apps is always cheaper or faster than the alternatives.
 
+## Infrastructure as Code Standard
+
+Configure all Azure resources through Bicep. Prefer maintained Azure Verified Modules (AVM) whenever a suitable module exists. When no suitable AVM is available, author native Bicep; do not switch to ARM JSON, Terraform, or imperative CLI provisioning scripts. Use `.bicepparam` files for environment-specific parameter values.
+
 ## Assumptions to Validate
 
 The initial topology assumes all of the following:
