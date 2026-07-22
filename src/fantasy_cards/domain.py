@@ -33,6 +33,7 @@ class Artifact:
     artifact_id: str
     media_type: str
     size_bytes: int
+    file_path: str
 
 
 @dataclass(frozen=True, slots=True)

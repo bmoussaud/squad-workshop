@@ -1,7 +1,20 @@
-"""In-memory adapters for local development and tests."""
+"""Image generation and in-memory persistence adapters."""
 
+from base64 import b64decode
+from binascii import Error as Base64Error
+from collections.abc import Callable
 from hashlib import sha256
+from io import BytesIO
+import os
+from pathlib import Path
+import re
+from tempfile import NamedTemporaryFile
+from typing import Any, Protocol
+from urllib.parse import urlsplit
 from uuid import uuid4
+import warnings
+
+from PIL import Image, UnidentifiedImageError
 
 from fantasy_cards.domain import Artifact, GeneratedImage, GenerationJob
 
@@ -15,17 +28,276 @@ class InMemoryImageGenerator:
         )
 
 
+class ImageGenerationError(RuntimeError):
+    """A safe, provider-neutral image generation failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class _ImagesClient(Protocol):
+    images: Any
+
+
+FoundryClientFactory = Callable[[str, float], _ImagesClient]
+
+_AZURE_OPENAI_RESOURCE_HOST = re.compile(
+    r"^(?P<resource>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.openai\.azure\.com$"
+)
+_FOUNDRY_SERVICES_HOST = re.compile(
+    r"^(?P<resource>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.services\.ai\.azure\.com$"
+)
+_MAX_PNG_BYTES = 25 * 1024 * 1024
+_MAX_PNG_PIXELS = 16_777_216
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_PNG_IEND = b"IEND"
+_ARTIFACT_EXTENSIONS = {
+    "image/png": ".png",
+    "text/plain": ".txt",
+}
+
+
+class FoundryImageGenerator:
+    def __init__(
+        self,
+        endpoint: str,
+        deployment: str,
+        timeout_seconds: float,
+        client_factory: FoundryClientFactory,
+    ) -> None:
+        self._endpoint = endpoint
+        self._deployment = deployment
+        self._timeout_seconds = timeout_seconds
+        self._client_factory = client_factory
+        self._client: _ImagesClient | None = None
+
+    def generate(self, prompt: str) -> GeneratedImage:
+        try:
+            response = self._get_client().images.generate(
+                model=self._deployment,
+                prompt=prompt,
+                n=1,
+                size="1024x1024",
+            )
+        except Exception as error:
+            raise _translate_provider_error(error) from None
+
+        try:
+            if len(response.data) != 1:
+                raise ImageGenerationError(
+                    "invalid_response",
+                    "The image provider returned an invalid response.",
+                )
+            encoded_image = response.data[0].b64_json
+            content = b64decode(encoded_image, validate=True)
+        except ImageGenerationError:
+            raise
+        except (AttributeError, IndexError, TypeError, ValueError, Base64Error):
+            raise ImageGenerationError(
+                "invalid_response", "The image provider returned an invalid response."
+            ) from None
+
+        _validate_png(content)
+
+        return GeneratedImage(
+            content=content,
+            media_type="image/png",
+            generator_name="foundry",
+        )
+
+    def _get_client(self) -> _ImagesClient:
+        if self._client is None:
+            self._client = self._client_factory(
+                self._endpoint, self._timeout_seconds
+            )
+        return self._client
+
+
+def create_foundry_client(endpoint: str, timeout_seconds: float) -> _ImagesClient:
+    base_url = normalize_azure_openai_endpoint(endpoint)
+    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+    from openai import OpenAI
+
+    token_provider = get_bearer_token_provider(
+        DefaultAzureCredential(), "https://ai.azure.com/.default"
+    )
+    return OpenAI(
+        base_url=base_url,
+        api_key=token_provider,
+        timeout=timeout_seconds,
+        max_retries=0,
+    )
+
+
+def normalize_azure_openai_endpoint(endpoint: str) -> str:
+    if not endpoint or endpoint != endpoint.strip() or any(
+        character.isspace() for character in endpoint
+    ):
+        raise ValueError("Azure OpenAI endpoint is invalid.")
+
+    try:
+        parsed = urlsplit(endpoint)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("Azure OpenAI endpoint is invalid.") from None
+
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in (None, 443)
+    ):
+        raise ValueError("Azure OpenAI endpoint is invalid.")
+
+    normalized_hostname = hostname.lower()
+    is_azure_openai_resource = _AZURE_OPENAI_RESOURCE_HOST.fullmatch(
+        normalized_hostname
+    )
+    is_foundry_service = _FOUNDRY_SERVICES_HOST.fullmatch(normalized_hostname)
+    if (
+        is_azure_openai_resource
+        and parsed.path not in ("", "/", "/openai/v1", "/openai/v1/")
+    ) or (is_foundry_service and parsed.path not in ("/openai/v1", "/openai/v1/")):
+        raise ValueError("Azure OpenAI endpoint is invalid.")
+    if not is_azure_openai_resource and not is_foundry_service:
+        raise ValueError("Azure OpenAI endpoint is invalid.")
+
+    return f"https://{normalized_hostname}/openai/v1"
+
+
+def _validate_png(content: bytes) -> None:
+    if not content or len(content) > _MAX_PNG_BYTES:
+        raise _invalid_response()
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as image:
+                if image.format != "PNG" or image.width * image.height > _MAX_PNG_PIXELS:
+                    raise _invalid_response()
+                image.verify()
+            with Image.open(BytesIO(content)) as image:
+                image.load()
+    except ImageGenerationError:
+        raise
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+        SyntaxError,
+        ValueError,
+    ):
+        raise _invalid_response() from None
+
+    _validate_png_stream_termination(content)
+
+
+def _validate_png_stream_termination(content: bytes) -> None:
+    if not content.startswith(_PNG_SIGNATURE):
+        raise _invalid_response()
+
+    offset = len(_PNG_SIGNATURE)
+    while offset < len(content):
+        remaining = len(content) - offset
+        if remaining < 12:
+            raise _invalid_response()
+
+        data_length = int.from_bytes(content[offset : offset + 4], "big")
+        if data_length > remaining - 12:
+            raise _invalid_response()
+
+        chunk_type = content[offset + 4 : offset + 8]
+        chunk_end = offset + 12 + data_length
+        if chunk_type == _PNG_IEND:
+            if data_length != 0 or chunk_end != len(content):
+                raise _invalid_response()
+            return
+
+        offset = chunk_end
+
+    raise _invalid_response()
+
+
+def _invalid_response() -> ImageGenerationError:
+    return ImageGenerationError(
+        "invalid_response", "The image provider returned an invalid response."
+    )
+
+
+def _translate_provider_error(error: Exception) -> ImageGenerationError:
+    status_code = getattr(error, "status_code", None)
+    error_code = _provider_error_code(error)
+    if status_code in (401, 403):
+        return ImageGenerationError(
+            "authentication_failed", "Image provider authentication failed."
+        )
+    if status_code == 429:
+        return ImageGenerationError(
+            "throttled", "The image provider is temporarily rate limited."
+        )
+    if status_code is not None and status_code >= 500:
+        return ImageGenerationError(
+            "provider_unavailable", "The image provider is temporarily unavailable."
+        )
+    if "content" in error_code or "safety" in error_code:
+        return ImageGenerationError(
+            "safety_rejected", "The image request was rejected by safety controls."
+        )
+    if error.__class__.__name__ in ("APIConnectionError", "APITimeoutError"):
+        return ImageGenerationError(
+            "provider_unavailable", "The image provider is temporarily unavailable."
+        )
+    return ImageGenerationError("generation_failed", "Image generation failed.")
+
+
+def _provider_error_code(error: Exception) -> str:
+    code = getattr(error, "code", "")
+    body = getattr(error, "body", None)
+    if not code and isinstance(body, dict):
+        code = body.get("code", "")
+        nested_error = body.get("error")
+        if not code and isinstance(nested_error, dict):
+            code = nested_error.get("code", "")
+    return str(code).lower()
+
+
 class InMemoryArtifactStore:
-    def __init__(self) -> None:
+    def __init__(self, output_directory: str | Path = "artifacts") -> None:
+        self._output_directory = Path(output_directory)
         self._content: dict[str, bytes] = {}
 
     def save(self, content: bytes, media_type: str) -> Artifact:
         artifact_id = str(uuid4())
+        extension = _ARTIFACT_EXTENSIONS.get(media_type, ".bin")
+        self._output_directory.mkdir(parents=True, exist_ok=True)
+        file_path = self._output_directory / f"{artifact_id}{extension}"
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                dir=self._output_directory,
+                prefix=f".{artifact_id}-",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+                temporary_file.write(content)
+            os.link(temporary_path, file_path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
         self._content[artifact_id] = content
         return Artifact(
             artifact_id=artifact_id,
             media_type=media_type,
             size_bytes=len(content),
+            file_path=str(file_path),
         )
 
     def read(self, artifact_id: str) -> bytes:

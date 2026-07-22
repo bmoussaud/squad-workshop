@@ -8,6 +8,11 @@ version = "0.1.0"
 description = "Provider-neutral fantasy card generation application"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "azure-identity>=1.20.0",
+    "openai>=2.46.0,<3",
+    "pillow>=11.3.0,<13",
+]
 
 [project.scripts]
 fantasy-card = "fantasy_cards.cli:main"

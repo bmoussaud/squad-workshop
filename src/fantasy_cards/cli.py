@@ -2,15 +2,16 @@
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from uuid import uuid4
 
-from fantasy_cards.adapters import deterministic_idempotency_key
-from fantasy_cards.config import build_local_application
+from fantasy_cards.adapters import ImageGenerationError, deterministic_idempotency_key
+from fantasy_cards.config import ConfigurationError, build_local_application
 from fantasy_cards.domain import CardGenerationRequest
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a local fantasy card artifact")
     parser.add_argument("title")
     parser.add_argument("prompt")
@@ -25,9 +26,14 @@ def main() -> None:
         idempotency_key=arguments.idempotency_key
         or deterministic_idempotency_key(arguments.title, arguments.prompt),
     )
-    job = build_local_application().service.generate(request)
+    try:
+        job = build_local_application().service.generate(request)
+    except (ConfigurationError, ImageGenerationError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
     print(json.dumps(asdict(job), indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

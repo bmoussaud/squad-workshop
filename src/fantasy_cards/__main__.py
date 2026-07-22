@@ -1,3 +1,3 @@
 from fantasy_cards.cli import main
 
-main()
+raise SystemExit(main())

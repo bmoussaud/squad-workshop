@@ -47,14 +47,41 @@ This repository includes a development container that prepares the core workshop
 
 ## Run the Python application locally
 
-The initial application is a provider-neutral, in-memory generation path. It requires Python 3.11 or newer and has no runtime dependencies.
+The application requires Python 3.11 or newer. It uses the offline, in-memory image generator by default, so local runs do not need Azure credentials or network access.
 
 ```bash
 uv sync
 uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
 ```
 
-The command prints a completed job record with correlation, idempotency, generator provenance, and artifact metadata. The in-memory generator creates a text demonstration artifact; no image provider or Azure service has been selected.
+The command prints a completed job record with correlation, idempotency, generator provenance, and artifact metadata. The in-memory generator creates a text demonstration artifact.
+
+Generated files are written to the `artifacts/` directory by default. Each filename contains the artifact UUID and uses an allowlisted extension based on its media type (`.png` for `image/png`, `.txt` for `text/plain`, and `.bin` otherwise). Set `FANTASY_CARD_OUTPUT_DIR` to write artifacts elsewhere:
+
+```bash
+export FANTASY_CARD_OUTPUT_DIR="/path/to/generated-cards"
+```
+
+The job JSON includes the persisted file location in `artifact.file_path`.
+
+### Use an existing Microsoft Foundry deployment
+
+Foundry image generation is opt-in and uses Microsoft Entra authentication. Configure an existing GPT-image deployment at runtime:
+
+```bash
+export FANTASY_CARD_IMAGE_GENERATOR=foundry
+export AZURE_OPENAI_ENDPOINT="https://foundry-j7hqwc4422gp4.services.ai.azure.com/openai/v1"
+export AZURE_OPENAI_DEPLOYMENT_NAME="<gpt-image-2-deployment-name>"
+export FANTASY_CARD_IMAGE_TIMEOUT_SECONDS=60
+azd auth login
+uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
+```
+
+`FANTASY_CARD_IMAGE_TIMEOUT_SECONDS` is optional and must be between 1 and 120 seconds. The client does not automatically retry image generation because a retry can duplicate provider charges.
+
+Set `AZURE_OPENAI_ENDPOINT` to the exact inference endpoint for the resource that owns the named deployment. The application accepts valid `*.services.ai.azure.com/openai/v1` and `*.openai.azure.com/openai/v1` endpoint families, but it does not translate one hostname family into the other. An endpoint and deployment from different resources can produce `500 Unable to get resource information` from the service.
+
+The runtime identity needs the **Cognitive Services OpenAI User** role on the Azure OpenAI resource. Local development can use an authenticated Azure CLI session. In Azure, `DefaultAzureCredential` automatically uses managed identity; set `AZURE_CLIENT_ID` when selecting a user-assigned managed identity. Endpoints, deployment names, and credentials remain runtime configuration and must not be committed.
 
 Run the tests with:
 
