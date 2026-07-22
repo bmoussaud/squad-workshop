@@ -8,3 +8,5 @@
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
+
+📌 Team update (2026-07-22T12:40:47+0000): Python is the primary application language; use `uv` for Python project, dependency, environment, and command workflows, and TOML centered on `pyproject.toml` for canonical project and tool configuration. Keep runtime secrets and deployment settings in environment variables, secret stores, or deployment configuration. — decided by bmoussaud
