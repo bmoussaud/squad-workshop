@@ -4,7 +4,9 @@ Status: proposed for validation; no infrastructure implementation is authorized 
 
 ## Decision Summary
 
-Use a single **Azure Container Apps** HTTP application as the initial production host, backed by **Azure Blob Storage** for generated images and artifact metadata. Give the app a system-assigned managed identity for Azure access, keep the external image-model credential in **Azure Key Vault**, and send platform logs to an **Azure Monitor Log Analytics workspace**. Instrument application traces and metrics with OpenTelemetry and export them to **Azure Monitor Application Insights**.
+Use a single **Azure Container Apps** HTTP application as the initial production host in a Container Apps environment with a **dedicated workload profile**, backed by **Azure Blob Storage** for generated images and artifact metadata. Prefer **France Central** for application and platform resources, subject to service and SKU availability, quota, data-residency, latency, and recovery validation. Assign a **user-assigned managed identity** for Azure access, keep any model-provider credential that cannot use Microsoft Entra authentication in **Azure Key Vault**, and send platform logs to an **Azure Monitor Log Analytics workspace**. Instrument application and agent traces and metrics with OpenTelemetry and export them to **Azure Monitor Application Insights**.
+
+Use **Microsoft Foundry** as the approved platform for agent capabilities and model access without selecting a final model in this design. Prefer **Sweden Central** for the Foundry project and deployments, but revalidate the required Foundry features, model and version, deployment SKU, quota, and available capacity immediately before provisioning. The application-to-Foundry path is therefore cross-region by default; production approval requires measured and accepted latency, data-residency behavior, network path, egress cost, and failure coupling between France Central and Sweden Central.
 
 Start with synchronous orchestration only while measurements support it. Keep the existing job-shaped application contract and cloud-neutral ports for model invocation, artifact storage, and job state. If the queue trigger below is reached, split request intake from generation by adding a queue and a separately scaled worker; do not move orchestration logic into Azure SDK bindings or hosting-framework callbacks.
 
@@ -18,13 +20,13 @@ Configure all Azure resources through Bicep. Prefer maintained Azure Verified Mo
 
 The initial topology assumes all of the following:
 
-- The service is CPU orchestration: it validates requests, calls an external image model over HTTPS, and stores results. It does not run the image model or require a GPU in Azure.
+- The service is CPU orchestration: it validates requests, runs agent orchestration, calls a model through a provider-neutral port, and stores results. Microsoft Foundry is the approved agent/model platform, while final model and deployment selection remains open. The application host does not run the model or require a GPU.
 - A generated image is binary object data suitable for block blobs. Request and status records are small JSON documents.
 - Initial traffic is low and bursty: development is mostly idle, initial production averages fewer than 100 jobs per day, and expected concurrent model calls are no more than two until provider limits are measured.
 - Typical end-to-end generation finishes within 60 seconds and the provisional application deadline is 120 seconds. Clients and every proxy in front of the service can tolerate that synchronous wait.
-- The external provider supports bounded request timeouts and either idempotency keys or safe application-level deduplication. Its rate and spend limits are known before production.
-- A cold start is acceptable in development. Initial production can either tolerate cold starts or fund one minimum replica.
-- A single Azure region and locally redundant storage are acceptable initially. Recovery point, recovery time, residency, and zone requirements remain open.
+- The selected model endpoint supports bounded request timeouts and either idempotency keys or safe application-level deduplication. Its rate, quota, capacity, and spend limits are known before production.
+- A cold start is acceptable for a development app on the Consumption workload profile. Production uses a dedicated workload profile and must fund and validate the selected profile capacity; keep at least one application replica when the latency objective requires it.
+- France Central is acceptable for application and platform resources, and Sweden Central is acceptable for Microsoft Foundry, only after service/SKU availability, quota, recovery, data-residency, latency, cross-region network path, egress cost, and failure-coupling requirements are validated.
 - Images are private by default. The application returns short-lived, narrowly scoped access URLs only if direct client download is required.
 - The team accepts containers and a registry as deployment artifacts. If it does not, Functions Flex Consumption or App Service becomes more attractive.
 
@@ -34,7 +36,8 @@ Before provisioning, replace these assumptions with measured values for generati
 
 | Option | Why it is credible | Main constraints and costs | Fit for this service |
 | --- | --- | --- | --- |
-| **Azure Container Apps, Consumption plan** | Runs the normal Python HTTP container, supports HTTPS ingress, revisions, managed identity, HTTP/KEDA scaling, and scale to zero. The same environment can later host a queue-driven worker or Container Apps job. | Requires building and scanning an image and normally an image registry. Scale-to-zero adds cold-start latency. Active and idle resource usage, requests, registry, logs, and network egress can all contribute to cost. Replica targets are bounded by configured minimum/maximum values and available quota, not guaranteed capacity. | **Recommended default.** It keeps Azure at the adapter and deployment boundary and offers the least disruptive synchronous-to-asynchronous path. |
+| **Azure Container Apps environment with a Dedicated workload profile** | Runs the normal Python HTTP container with HTTPS ingress, revisions, managed identity, HTTP/KEDA scaling, and compute reserved in a dedicated pool. The environment can later host a separately scaled queue-driven worker on an appropriate workload profile. | Requires building and scanning an image and normally an image registry. Dedicated profiles bill per running profile instance, so profile size and minimum/maximum instance counts require load and cost validation. Registry, logs, cross-region Foundry calls, and network egress also contribute to cost. Capacity remains subject to regional SKU availability and quota. | **Recommended production default.** It provides an explicit production capacity boundary while keeping Azure at the adapter and deployment boundary and preserving the synchronous-to-asynchronous path. |
+| **Azure Container Apps, Consumption workload profile** | Uses the same container and Container Apps control plane with serverless scaling and optional scale to zero. | Scale-to-zero adds cold-start latency. Per-replica resource use, requests, registry, logs, and egress contribute to cost, and available quota bounds scaling. | Useful for development, low-cost validation, and comparison. It is not the recommended production profile for this application. |
 | **Azure Functions, Flex Consumption plan** | GA serverless Functions host for Linux code deployments with event-driven scale, managed identity, VNet integration, configurable per-instance concurrency, and pay-as-you-go execution. Microsoft recommends Flex Consumption for new dynamic-scale function apps rather than the legacy Consumption plan. | Adopting HTTP and queue triggers introduces the Functions programming model and host configuration at the entry point. HTTP-triggered work still has a documented 230-second response ceiling even where function execution time can be longer. Flex instances have fixed memory choices and regional subscription quotas. Always-ready instances add cost. | Good alternative if the team wants minimal container operations and expects queue-triggered execution early. Keep triggers as thin adapters around the same core. Not the default because the current application is a general Python service, not yet an event-function workload. |
 | **Azure App Service on Linux** | Mature hosting for Python web apps and custom containers, with managed identity, deployment slots on eligible tiers, health checks, VNet options, and predictable dedicated capacity. It can share an existing underused App Service plan. | An App Service plan bills for provisioned workers even while this app is idle. Scaling and worker sizing require more deliberate capacity management. Long HTTP requests remain vulnerable to client, proxy, and platform idle timeouts; a web worker timeout is not an end-to-end guarantee. | Prefer when the organization already pays for suitable spare capacity, needs App Service operational features, or requires predictable always-on compute. Otherwise it is larger than this initial workload needs. |
 
@@ -46,10 +49,10 @@ Do not introduce AKS, Azure Batch, a virtual machine, Durable Functions, or Azur
 
 Use explicit application and platform bounds instead of unconstrained autoscaling:
 
-- Development: `minReplicas = 0`, `maxReplicas = 1`.
-- Initial production: `minReplicas = 1` only if the latency objective cannot tolerate cold starts; otherwise start at `0`. Set `maxReplicas = 2` until the external provider's concurrency and spend controls are verified.
+- Development on the Consumption workload profile: `minReplicas = 0`, `maxReplicas = 1`.
+- Initial production on a dedicated workload profile: select the smallest validated general-purpose profile SKU and set explicit minimum/maximum profile instance counts from load, availability, and cost tests. Set the app to `minReplicas = 1` when required by the latency objective, and initially cap `maxReplicas = 2` until model deployment concurrency, quota, capacity, and spend controls are verified.
 - Start with one in-flight generation per process. Increase only after load tests show that Python worker behavior, memory, outbound connections, Blob writes, and provider quotas remain healthy.
-- Keep the HTTP scaling threshold aligned with useful per-replica concurrency. Container Apps' documented default HTTP concurrent-request threshold is 10, which is too permissive if each request can launch a costly model call; configure it deliberately rather than relying on the default.
+- Keep the HTTP scaling threshold aligned with useful per-replica concurrency. Container Apps' documented default HTTP concurrent-request threshold is 10, which is too permissive if each request can launch a costly model or agent call; configure it deliberately rather than relying on the default.
 - Enforce a provider-call timeout below the request deadline, leave time to persist terminal job state, and do not retry a model charge blindly. Retry only classified transient failures with a strict attempt and elapsed-time budget.
 - Treat platform maximum replica counts as service ceilings, not desired settings. Subscription quotas and downstream capacity are the real limits.
 
@@ -72,21 +75,36 @@ Development should use the filesystem adapter for pure unit tests and **Azurite*
 
 ## Identity and Secrets
 
-- Assign the compute host a system-assigned managed identity. Use `DefaultAzureCredential` in Azure adapters so local developer credentials and hosted managed identity use the same code path.
+- Assign the application a user-assigned managed identity and attach it to each Container App component that needs the same access. Its stable lifecycle keeps the principal and RBAC assignments intact across app revisions, replacement, and approved multi-component reuse. Use `DefaultAzureCredential` with the configured client ID in Azure adapters so local developer credentials and hosted managed identity follow the same code path.
 - Grant data-plane roles at resource or container scope. Azure resource ownership does not itself grant Blob data access.
 - Put only non-secret settings in Container Apps environment variables.
-- Store the external model API key in an Azure Key Vault Standard vault dedicated to this application and environment. Grant the host identity **Key Vault Secrets User** at vault scope. Container Apps can expose a Key Vault-backed secret reference to the container.
+- Use Microsoft Entra authentication and Azure RBAC for Microsoft Foundry where supported. Store only model-provider credentials that cannot use federation in an Azure Key Vault Standard vault dedicated to this application and environment. Grant the application identity **Key Vault Secrets User** at vault scope. Container Apps can expose a Key Vault-backed secret reference to the container.
 - Prefer direct Microsoft Entra authentication for Azure Storage, monitoring integrations, and a future Azure queue. Do not store Azure Storage connection strings when managed identity is supported.
-- Separate development and production identities, vaults, storage containers/accounts, and telemetry resources as the eventual environment design requires. Do not let a development identity read production artifacts.
+- Separate development and production identities, vaults, storage containers/accounts, Foundry projects/deployments, and telemetry resources as the eventual environment design requires. Do not let a development identity read production artifacts or invoke production model deployments.
+- Use separate user-assigned identities when components need materially different permissions or isolation boundaries; stable reuse is not a reason to broaden access. Preserve least privilege and scope each role assignment as narrowly as the service supports.
 - Define secret rotation and provider-key revocation tests. Key Vault storage alone does not prove that the application picks up a rotated secret safely.
 
-If the external image provider supports Microsoft Entra workload identity or another secretless federation method, prefer it after verifying the provider's documented support. An API key remains the conservative interoperability assumption.
+If an approved non-Foundry model provider supports Microsoft Entra workload identity or another secretless federation method, prefer it after verifying the provider's documented support. An API key remains the conservative fallback interoperability assumption.
+
+## Agentic Platform and Regions
+
+Microsoft Foundry is validated and approved as the agent/model platform. Keep the application model and agent ports provider-neutral so model choice, deployment type, or a future provider change does not leak into domain orchestration. Evaluate Microsoft Agent Framework for the agent implementation, and require quality evaluation, tracing, safety testing, and versioned rollout before production; this design does not select a model or authorize a Foundry deployment.
+
+Prefer Sweden Central for the Foundry project, Agent Service capabilities, and model deployments. That preference is not evidence that every required model, tool, agent feature, deployment SKU, or capacity allocation is available there. Before provisioning, verify the exact model/version and deployment type, required Agent Service tools and features, subscription quota, live capacity, networking support, and data-processing geography in current Microsoft documentation and the target subscription.
+
+With the application in France Central and Foundry in Sweden Central, validate and explicitly accept:
+
+- End-to-end p50/p95/p99 latency and timeout budgets across the inter-region path.
+- Data residency and processing locations for prompts, outputs, agent state, traces, evaluation data, and the selected model deployment type.
+- Network routing, DNS, private connectivity or public egress controls, and failure behavior when either region or the path between them is impaired.
+- Inter-region data-transfer and egress charges under representative request and response sizes.
+- Failure coupling, retry amplification, and whether recovery requires a second Foundry deployment, a different supported region, queue buffering, or a degraded application mode.
 
 ## Logs, Metrics, and Traces
 
 Emit structured JSON to stdout/stderr. Connect the Container Apps environment to a Log Analytics workspace for console and system logs, and enable HTTP logs through Azure Monitor diagnostic settings if their data classification is acceptable. HTTP log fields can contain query strings and client IP addresses, so never place credentials in URLs and set a retention limit.
 
-Instrument the cloud-neutral Python core with OpenTelemetry APIs. Use the Azure Monitor OpenTelemetry Distro or a supported exporter at the composition boundary to send traces and metrics to Application Insights. Propagate one correlation ID across the HTTP request, job record, provider call, and Blob write.
+Instrument the cloud-neutral Python core with OpenTelemetry APIs. Use the Azure Monitor OpenTelemetry Distro or a supported exporter at the composition boundary to send traces and metrics to Application Insights. Propagate one correlation ID across the HTTP request, agent and tool calls, model invocation, job record, and Blob write.
 
 Minimum production signals:
 
@@ -95,7 +113,7 @@ Minimum production signals:
 | Availability | Health endpoint failures and sustained 5xx rate |
 | Latency | Request p50/p95/p99 and model-call p50/p95/p99 |
 | Work outcome | Jobs started, succeeded, failed, timed out, and abandoned |
-| External dependency | Provider latency, status class, throttles, retries, and estimated/actual cost where available |
+| Agent/model dependency | Foundry and model latency, tool-call outcomes, status class, throttles, retries, token or unit use, and estimated/actual cost where available |
 | Capacity | Replica count, CPU, memory, concurrent generations, and rejected work |
 | Storage | Blob write failures, bytes stored, transaction count, and lifecycle/retention failures |
 | Cost | Azure Cost Management budget alerts plus a separate provider-spend alert; review Log Analytics ingestion and retention |
@@ -104,14 +122,14 @@ Never log full provider credentials, signed URLs, complete prompts by default, g
 
 ## Cost Boundaries
 
-Pricing varies by region, agreement, date, workload shape, and telemetry volume; calculate the chosen region in the Azure pricing calculator before provisioning. The first production deployment must define:
+Pricing varies by region, agreement, date, workload shape, and telemetry volume; calculate France Central application/platform resources and Sweden Central Foundry usage, including cross-region transfer, with current pricing before provisioning. The first production deployment must define:
 
 - A monthly Azure budget with alerts at 50%, 80%, and 100% of the approved amount.
-- An independent monthly and per-minute limit at the external image provider, because provider charges are likely to dominate CPU orchestration costs.
-- Maximum replicas and maximum in-flight provider calls. Autoscaling must not bypass the provider budget.
+- Independent monthly and per-minute limits for Foundry model/tool usage and any external provider, because agent/model charges can dominate CPU orchestration costs.
+- Maximum replicas and maximum in-flight agent/model calls. Autoscaling must not bypass model quota, capacity, or budget controls.
 - Log sampling and retention, because verbose request/dependency telemetry can exceed compute cost at low application volume.
 - Artifact retention and maximum accepted/generated object sizes.
-- A deployment-region check for Container Apps, Functions Flex Consumption, Key Vault, Storage redundancy, and required quotas before final selection.
+- A deployment-region check for the dedicated Container Apps workload profile SKU, Functions Flex Consumption alternatives, Key Vault, Storage redundancy, Microsoft Foundry features, the selected model deployment SKU, and required quota/capacity before final selection.
 
 Do not claim a fixed monthly price until request rate, duration, memory, minimum replicas, image size, retention, transactions, logs, registry, and egress are entered into current calculators.
 
@@ -132,8 +150,8 @@ Do not wait for customer-visible timeouts if load testing already crosses a trig
 Preserve the public job resource and change submission to return `202 Accepted` with a status URL:
 
 1. The HTTP Container App validates the request, creates the durable job record, and enqueues only the job ID plus minimal routing metadata.
-2. A separate Container App worker consumes the message, loads the job through the provider-neutral repository port, calls the model port, stores the Blob artifact, and updates terminal state.
-3. Scale the worker on queue depth with `minReplicas = 0` and a small `maxReplicas` capped by provider concurrency and budget. Scale intake independently on HTTP demand.
+2. A separate Container App worker consumes the message, loads the job through the provider-neutral repository port, runs the agent/model ports, stores the Blob artifact, and updates terminal state.
+3. In production, place the worker on a validated dedicated workload profile. Scale it on queue depth with an explicit small `maxReplicas` capped by model concurrency, quota, capacity, and budget; choose `minReplicas` and dedicated profile instance counts from latency and cost requirements. Scale intake independently on HTTP demand.
 4. Make processing idempotent by job ID. Assume at-least-once delivery, define message visibility/lock renewal against measured processing duration, bound retries, and monitor oldest-message age and poison/dead-letter work.
 5. Return status through the existing job endpoint; add events or webhooks only when polling is insufficient.
 
@@ -146,46 +164,51 @@ Choose an **Azure Service Bus queue** instead when built-in dead-lettering, dupl
 ### Development
 
 - Run the cloud-neutral Python service locally in its normal web process.
-- Use a fake model adapter by default; opt into the real provider only with a developer-scoped key and hard spend limit.
+- Use fake agent and model adapters by default; opt into a development Foundry deployment or other real provider only with developer-scoped access and a hard spend limit.
 - Use filesystem artifact/job adapters for fast tests and Azurite for Blob and future Queue integration tests.
 - Emit local structured logs and OpenTelemetry to a console or local collector. Do not require Azure to run unit tests.
-- Optionally deploy one shared development Container App with scale-to-zero, one development storage account/container, a development Key Vault, and short telemetry retention for end-to-end validation.
+- Optionally deploy one shared development Container App on the Consumption workload profile with scale-to-zero, one development storage account/container, a development Key Vault, a development Foundry project/deployment, and short telemetry retention for end-to-end validation.
 
 ### Initial Production
 
-- One Azure Container Apps environment and one externally accessible HTTP Container App on the Consumption plan.
+- France Central as the preferred region for application/platform resources, after service/SKU availability, quota, data-residency, latency, and recovery validation.
+- One Azure Container Apps environment with a validated dedicated workload profile and one externally accessible HTTP Container App assigned to that profile.
 - One general-purpose v2 Storage account with a private artifact container; use block blobs and an explicit lifecycle policy.
-- One system-assigned managed identity with container-scoped Blob data access and Key Vault secret-read access.
-- One Key Vault Standard vault for the external provider credential.
+- One user-assigned managed identity with container-scoped Blob data access, Foundry invocation access, and Key Vault secret-read access where required. Add separate user-assigned identities for components whose permissions must be isolated.
+- One Key Vault Standard vault for credentials that cannot use Microsoft Entra authentication.
+- Sweden Central as the preferred region for a Microsoft Foundry project and the selected agent/model deployments, only after exact feature, model, deployment SKU, quota, capacity, networking, and data-residency validation.
 - One Log Analytics workspace and workspace-based Application Insights resource, with structured logs, OpenTelemetry, actionable alerts, sampling, and retention limits.
 - No queue initially, provided every assumption and synchronous acceptance test passes. Keep `maxReplicas` and provider concurrency low and explicit.
 
-If production cannot tolerate cold starts, set one minimum replica and accept the idle cost. If it cannot tolerate synchronous failure coupling, add the queue before launch rather than using a longer timeout.
+Set at least one application replica when the latency objective requires it, and include dedicated workload profile instance charges in the approved baseline cost. If production cannot tolerate synchronous or France Central-to-Sweden Central failure coupling, add the queue or an approved regional recovery/degraded-mode design before launch rather than using a longer timeout.
 
 ## Alternatives and Re-evaluation
 
 - Choose Functions Flex Consumption if thin trigger adapters, code-only deployment, and an early queue-triggered worker are preferred over container portability.
+- Use the Container Apps Consumption workload profile for development or a measured non-production comparison, not as the recommended production default.
 - Choose App Service if suitable paid capacity already exists, deployment slots and mature web-app operations are decisive, or predictable always-on workers are required.
 - Add Front Door or API Management only for demonstrated edge routing, WAF, global distribution, client policy, or API governance needs; each introduces another timeout, cost, and operational boundary.
 - Add private endpoints, VNet integration, NAT, or firewall egress controls when threat modeling, compliance, provider IP allowlisting, or data-exfiltration controls require them. Validate Container Apps environment/networking constraints before selecting a network topology.
-- Revisit storage redundancy, regional failover, and multi-region compute after recovery objectives and data residency are approved.
+- Revisit storage redundancy, regional failover, multi-region compute, and Foundry recovery placement after recovery objectives, cross-region failure behavior, and data residency are approved.
 - Revisit a dedicated job-state database when query and consistency requirements exceed guarded JSON blobs.
 
 ## Validation Gates Before Infrastructure Code
 
-1. Measure model latency, output size, failure modes, throttling, idempotency support, and price with representative requests.
-2. Define synchronous client deadline, availability target, retention/deletion requirements, recovery objectives, region, data classification, and approved monthly budgets.
-3. Load-test the selected container locally and in a temporary Azure deployment with the intended CPU/memory, concurrency, min/max replicas, and full ingress path.
-4. Prove managed-identity Blob access and Key Vault-backed secret retrieval without Azure connection strings.
-5. Prove correlation from request through provider dependency and Blob write, and test alerts for failure, latency, throttling, and budget thresholds.
+1. Select candidate agent/model capabilities before implementation, then measure model and tool latency, output size, failure modes, throttling, idempotency support, quality, safety, and price with representative requests. Do not finalize a model from this document alone.
+2. Define synchronous client deadline, availability target, retention/deletion requirements, recovery objectives, data classification, and approved monthly budgets. Validate France Central for application/platform resources and Sweden Central for Foundry against service/SKU availability, quota, capacity, data residency, latency, network path, egress cost, and recovery requirements.
+3. Load-test the selected container in a temporary Azure deployment with the intended dedicated workload profile SKU and instance bounds, CPU/memory, concurrency, min/max app replicas, full ingress path, and cross-region Foundry path.
+4. Prove user-assigned managed-identity Blob and Foundry access plus Key Vault-backed secret retrieval without Azure connection strings. Verify least-privilege RBAC survives app revisions/replacement and that components with different trust boundaries use separate identities.
+5. Prove correlation from request through agent/tool/model dependencies and Blob write, and test evaluations and alerts for failure, latency, throttling, quality regression, safety, and budget thresholds.
 6. Exercise shutdown during a generation. Confirm terminal state is recoverable and duplicate execution does not cause an uncontrolled second charge.
 7. Re-evaluate the queue trigger from measured p95/p99 and burst behavior. Record the final compute, redundancy, retention, and queue decisions before writing infrastructure as code.
+8. Revalidate the exact Foundry model/version, deployment SKU/type, Agent Service features and tools, Sweden Central support, subscription quota, and live capacity immediately before provisioning; document any fallback region and its data-residency implications.
 
 ## Verified Service References
 
 Service names and material behavior were checked against Microsoft Learn on 2026-07-22. Limits and availability can change; re-check them for the selected region and SKU during implementation.
 
 - [Azure Container Apps overview](https://learn.microsoft.com/azure/container-apps/overview)
+- [Workload profiles in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/workload-profiles-overview)
 - [Scaling in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/scale-app)
 - [Manage secrets in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/manage-secrets)
 - [Azure Functions scale and hosting](https://learn.microsoft.com/azure/azure-functions/functions-scale)
@@ -196,6 +219,9 @@ Service names and material behavior were checked against Microsoft Learn on 2026
 - [Azure Blob Storage lifecycle management](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview)
 - [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview)
 - [Azure Monitor Application Insights OpenTelemetry overview](https://learn.microsoft.com/azure/azure-monitor/app/app-insights-overview)
+- [What is Microsoft Foundry Agent Service?](https://learn.microsoft.com/azure/foundry/agents/overview)
+- [Feature availability across cloud regions in Microsoft Foundry](https://learn.microsoft.com/azure/foundry/reference/region-support)
+- [Foundry Models sold by Azure](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/models-sold-directly-by-azure)
 - [Introduction to Azure Queue Storage](https://learn.microsoft.com/azure/storage/queues/storage-queues-introduction)
 - [Introduction to Azure Service Bus](https://learn.microsoft.com/azure/service-bus-messaging/service-bus-messaging-overview)
 - [Best practices for background jobs](https://learn.microsoft.com/azure/architecture/best-practices/background-jobs)

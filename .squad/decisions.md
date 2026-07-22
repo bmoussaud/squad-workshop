@@ -12,6 +12,11 @@
 **What:** Python is the primary application development language. Use `uv` for Python project, dependency, environment, and command workflows. Use TOML, centered on `pyproject.toml`, as the canonical project and tool configuration format. Runtime secrets and deployment settings remain in appropriate environment variables, secret stores, or deployment configuration.
 **Why:** User directive establishing the project's application language, Python workflow tooling, and configuration standards while keeping runtime and deployment concerns in their appropriate systems.
 
+### 2026-07-22T12:49:52+0000: Azure hosting, agentic platform, and identity preferences
+**By:** bmoussaud (via Copilot)
+**What:** Prefer Azure Container Apps with dedicated workload profiles for production application hosting in France Central. Approve Microsoft Foundry for the agentic platform, with Sweden Central preferred, subject to validating the exact region, model, SKU, quota, capacity, and required features before provisioning. Prefer user-assigned managed identities while preserving least privilege and separate identities for distinct trust boundaries.
+**Why:** User directive establishing production hosting, agentic platform, regional, capacity-validation, and workload identity preferences.
+
 ## Governance
 
 - All meaningful changes require team consensus
