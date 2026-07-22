@@ -7,6 +7,7 @@ if ! gh copilot --help >/dev/null 2>&1; then
   fi
 fi
 
+# npm install -g @bradygaster/squad-cli
 echo 'Installed workshop tools:'
 git --version
 gh --version | head -n 1
