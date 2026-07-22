@@ -1,4 +1,22 @@
 {
-  "universe_usage_history": [],
-  "assignment_cast_snapshots": {}
+  "universe_usage_history": [
+    {
+      "universe": "The Matrix",
+      "assignment_id": "20260722-python-azure-image-generation",
+      "used_at": "2026-07-22T11:30:53+00:00"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "20260722-python-azure-image-generation": {
+      "universe": "The Matrix",
+      "agents": {
+        "lead": "Morpheus",
+        "python-engineer": "Trinity",
+        "generative-media-engineer": "Neo",
+        "azure-platform-engineer": "Tank",
+        "quality-engineer": "Switch"
+      },
+      "created_at": "2026-07-22T11:30:53+00:00"
+    }
+  }
 }

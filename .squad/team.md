@@ -12,6 +12,15 @@
 
 | Name | Role | Charter | Status |
 |------|------|---------|--------|
+| Morpheus | Lead | .squad/agents/morpheus/charter.md | 🏗️ Lead |
+| Trinity | Python Engineer | .squad/agents/trinity/charter.md | 🔧 Backend |
+| Neo | Generative Media Engineer | .squad/agents/neo/charter.md | 🎨 Generative Media |
+| Tank | Azure Platform Engineer | .squad/agents/tank/charter.md | ⚙️ Platform |
+| Switch | Quality Engineer | .squad/agents/switch/charter.md | 🧪 Quality |
+| Scribe | Session Logger | .squad/agents/scribe/charter.md | 📋 Scribe |
+| Ralph | Work Monitor | .squad/agents/ralph/charter.md | 🔄 Monitor |
+| Rai | RAI Reviewer | .squad/agents/Rai/charter.md | 🛡️ RAI |
+| Fact Checker | Fact Checker | .squad/agents/fact-checker/charter.md | 🔍 Verifier |
 
 
 ## Coding Agent
@@ -49,5 +58,7 @@
 
 ## Project Context
 
-- **Project:** squad-workshop
-- **Created:** 2026-07-22
+- **Owner:** bmoussaud
+- **Project:** Python application on Azure for generating fantasy trading-card-style imagery
+- **Stack:** Python, Azure, generative image models
+- **Created:** 2026-07-22T11:30:53+00:00

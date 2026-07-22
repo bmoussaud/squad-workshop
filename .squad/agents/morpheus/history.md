@@ -5,14 +5,6 @@
 - **Stack:** Python, Azure, generative image models
 - **Created:** 2026-07-22T11:30:53+00:00
 
-## Core Context
-
-Agent Rai initialized and ready for work.
-
-## Recent Updates
-
-📌 Team initialized on 2026-07-22
-
 ## Learnings
 
-Initial setup complete.
+<!-- Append new learnings below. Each entry is something lasting about the project. -->
