@@ -1,8 +1,6 @@
 {
   "name": "squad-workshop",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
+  "image": "mcr.microsoft.com/devcontainers/typescript-node",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
