@@ -17,6 +17,11 @@
 **What:** Prefer Azure Container Apps with dedicated workload profiles for production application hosting in France Central. Approve Microsoft Foundry for the agentic platform, with Sweden Central preferred, subject to validating the exact region, model, SKU, quota, capacity, and required features before provisioning. Prefer user-assigned managed identities while preserving least privilege and separate identities for distinct trust boundaries.
 **Why:** User directive establishing production hosting, agentic platform, regional, capacity-validation, and workload identity preferences.
 
+### 2026-07-22T13:28:52+0000: Azure application deployment workflow
+**By:** bmoussaud (via Copilot)
+**What:** Use the Azure Developer CLI (`azd`) and `azure.yaml` to manage application deployment to Azure. Authenticate the shell to the Azure subscription with `azd auth login`; Azure CLI authentication with `az login` is available as a fallback.
+**Why:** User directive establishing the project's Azure application deployment workflow.
+
 ## Governance
 
 - All meaningful changes require team consensus

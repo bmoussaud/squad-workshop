@@ -16,6 +16,14 @@ This recommendation is conditional on the assumptions below. It is not a claim t
 
 Configure all Azure resources through Bicep. Prefer maintained Azure Verified Modules (AVM) whenever a suitable module exists. When no suitable AVM is available, author native Bicep; do not switch to ARM JSON, Terraform, or imperative CLI provisioning scripts. Use `.bicepparam` files for environment-specific parameter values.
 
+## Application Deployment Orchestration
+
+Use Azure Developer CLI (`azd`) as the primary application deployment lifecycle and orchestration path, with a root `azure.yaml` as the declarative project and service contract. The contract points `azd` to the application and the Bicep infrastructure under `infra/`; it orchestrates Bicep and does not replace it.
+
+For an interactive shell, authenticate with `azd auth login` first. Use `az login` only when Azure CLI context is specifically required, not as an alternative imperative provisioning workflow. Configure the target environment and subscription explicitly; authentication alone does not select the deployment subscription.
+
+Prefer `azd` lifecycle commands for application deployment. Run `azd provision --preview` before `azd provision` or `azd up`, then proceed only after reviewing the proposed changes.
+
 ## Assumptions to Validate
 
 The initial topology assumes all of the following:
