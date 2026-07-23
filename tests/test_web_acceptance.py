@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -287,6 +288,81 @@ class WebAcceptanceTests(unittest.TestCase):
                 self.assert_error_envelope(response, public_code)
                 self.assertNotIn(private_detail, response.text)
                 self.assertNotIn("invalid-private-value", response.text)
+
+    def test_successful_generation_logs_safe_completion_metadata(self) -> None:
+        correlation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        private_description = "A knight with an unpublished private backstory"
+
+        with patch.dict(os.environ, self.environment, clear=True), patch(
+            "fantasy_cards.web._LOGGER.info"
+        ) as info:
+            with self.create_client() as client:
+                response = client.post(
+                    "/api/generations",
+                    json={"title": "Ember Sentinel", "description": private_description},
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        info.assert_called_once()
+        message = json.loads(info.call_args.args[0])
+        self.assertEqual(message["event"], "generation_completed")
+        self.assertEqual(message["correlation_id"], correlation_id)
+        self.assertEqual(message["outcome"], "succeeded")
+        self.assertTrue(message["success"])
+        self.assertEqual(message["size_bytes"], response.json()["artifact"]["size_bytes"])
+        self.assertIsInstance(message["duration_ms"], float)
+        self.assertEqual(
+            info.call_args.kwargs["extra"],
+            {
+                "correlation_id": correlation_id,
+                "duration_ms": message["duration_ms"],
+                "outcome": "succeeded",
+                "size_bytes": message["size_bytes"],
+                "success": True,
+            },
+        )
+        self.assertNotIn(private_description, info.call_args.args[0])
+        self.assertNotIn("Ember Sentinel", info.call_args.args[0])
+
+    def test_provider_failure_logs_safe_completion_metadata(self) -> None:
+        from fantasy_cards.adapters import ImageGenerationError
+
+        correlation_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        private_detail = "private prompt, endpoint, and provider response"
+        with patch.dict(os.environ, self.environment, clear=True), patch(
+            "fantasy_cards.adapters.LocalPngImageGenerator.generate",
+            side_effect=ImageGenerationError("provider_unavailable", private_detail),
+        ), patch("fantasy_cards.web._LOGGER.info") as info:
+            with self.create_client() as client:
+                response = client.post(
+                    "/api/generations",
+                    json={"title": "Title", "description": private_detail},
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+
+        self.assertEqual(response.status_code, 503, response.text)
+        info.assert_called_once()
+        message = json.loads(info.call_args.args[0])
+        self.assertEqual(message["event"], "generation_completed")
+        self.assertEqual(message["correlation_id"], correlation_id)
+        self.assertEqual(message["outcome"], "provider_unavailable")
+        self.assertFalse(message["success"])
+        self.assertEqual(message["dependency"], "provider")
+        self.assertEqual(message["error_code"], "provider_unavailable")
+        self.assertIsInstance(message["duration_ms"], float)
+        self.assertEqual(
+            info.call_args.kwargs["extra"],
+            {
+                "correlation_id": correlation_id,
+                "dependency": "provider",
+                "duration_ms": message["duration_ms"],
+                "error_code": "provider_unavailable",
+                "outcome": "provider_unavailable",
+                "success": False,
+            },
+        )
+        self.assertNotIn(private_detail, info.call_args.args[0])
 
     def test_rate_limit_rejects_eleventh_attempt_without_generation(self) -> None:
         with patch.dict(os.environ, self.environment, clear=True):

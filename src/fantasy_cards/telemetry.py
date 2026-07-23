@@ -17,11 +17,17 @@ def configure_telemetry(application: Any) -> bool:
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
     client_id = os.getenv("AZURE_CLIENT_ID", "").strip()
     if not connection_string or not client_id:
+        _LOGGER.info(
+            '{"event":"telemetry_configuration_selected","outcome":"disabled"}'
+        )
         return False
 
     application.router.add_event_handler(
         "startup",
         lambda: _activate_telemetry(application, connection_string, client_id),
+    )
+    _LOGGER.info(
+        '{"event":"telemetry_configuration_selected","outcome":"enabled"}'
     )
     return True
 
