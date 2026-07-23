@@ -16,7 +16,8 @@ import warnings
 
 from PIL import Image, UnidentifiedImageError
 
-from fantasy_cards.domain import Artifact, GeneratedImage, GenerationJob
+from fantasy_cards.domain import Artifact, ArtifactContent, GeneratedImage, GenerationJob
+from fantasy_cards.telemetry import dependency_span, record_span_outcome
 
 
 class InMemoryImageGenerator:
@@ -56,6 +57,34 @@ _ARTIFACT_EXTENSIONS = {
     "image/png": ".png",
     "text/plain": ".txt",
 }
+_MAX_WEB_ARTIFACT_BYTES = 10 * 1024 * 1024
+
+
+class ArtifactStorageError(RuntimeError):
+    """A safe, provider-neutral artifact persistence failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ArtifactNotFoundError(ArtifactStorageError):
+    """A requested artifact does not exist or its identifier is invalid."""
+
+    def __init__(self) -> None:
+        super().__init__("artifact_not_found", "The requested artifact was not found.")
+
+
+class LocalPngImageGenerator:
+    def generate(self, prompt: str) -> GeneratedImage:
+        image = Image.new("RGB", (768, 1024), "#17251d")
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return GeneratedImage(
+            content=output.getvalue(),
+            media_type="image/png",
+            generator_name="in-memory",
+        )
 
 
 class FoundryImageGenerator:
@@ -73,32 +102,44 @@ class FoundryImageGenerator:
         self._client: _ImagesClient | None = None
 
     def generate(self, prompt: str) -> GeneratedImage:
-        try:
-            response = self._get_client().images.generate(
-                model=self._deployment,
-                prompt=prompt,
-                n=1,
-                size="1024x1024",
-            )
-        except Exception as error:
-            raise _translate_provider_error(error) from None
-
-        try:
-            if len(response.data) != 1:
-                raise ImageGenerationError(
-                    "invalid_response",
-                    "The image provider returned an invalid response.",
+        with dependency_span("foundry", "generate") as span:
+            try:
+                response = self._get_client().images.generate(
+                    model=self._deployment,
+                    prompt=prompt,
+                    n=1,
+                    size="1024x1024",
                 )
-            encoded_image = response.data[0].b64_json
-            content = b64decode(encoded_image, validate=True)
-        except ImageGenerationError:
-            raise
-        except (AttributeError, IndexError, TypeError, ValueError, Base64Error):
-            raise ImageGenerationError(
-                "invalid_response", "The image provider returned an invalid response."
-            ) from None
+            except Exception as error:
+                translated_error = _translate_provider_error(error)
+                record_span_outcome(
+                    span, "failed", error_code=translated_error.code
+                )
+                raise translated_error from None
 
-        _validate_png(content)
+            try:
+                if len(response.data) != 1:
+                    raise ImageGenerationError(
+                        "invalid_response",
+                        "The image provider returned an invalid response.",
+                    )
+                encoded_image = response.data[0].b64_json
+                content = b64decode(encoded_image, validate=True)
+            except ImageGenerationError as error:
+                record_span_outcome(span, "failed", error_code=error.code)
+                raise
+            except (AttributeError, IndexError, TypeError, ValueError, Base64Error):
+                record_span_outcome(span, "failed", error_code="invalid_response")
+                raise ImageGenerationError(
+                    "invalid_response", "The image provider returned an invalid response."
+                ) from None
+
+            try:
+                _validate_png(content)
+            except ImageGenerationError as error:
+                record_span_outcome(span, "failed", error_code=error.code)
+                raise
+            record_span_outcome(span, "succeeded")
 
         return GeneratedImage(
             content=content,
@@ -249,7 +290,11 @@ def _translate_provider_error(error: Exception) -> ImageGenerationError:
         return ImageGenerationError(
             "safety_rejected", "The image request was rejected by safety controls."
         )
-    if error.__class__.__name__ in ("APIConnectionError", "APITimeoutError"):
+    if error.__class__.__name__ == "APITimeoutError":
+        return ImageGenerationError(
+            "provider_timeout", "The image provider timed out."
+        )
+    if error.__class__.__name__ == "APIConnectionError":
         return ImageGenerationError(
             "provider_unavailable", "The image provider is temporarily unavailable."
         )
@@ -300,8 +345,164 @@ class InMemoryArtifactStore:
             file_path=str(file_path),
         )
 
-    def read(self, artifact_id: str) -> bytes:
-        return self._content[artifact_id]
+    def read(self, artifact_id: str) -> ArtifactContent:
+        content = self._content[artifact_id]
+        path = next(self._output_directory.glob(f"{artifact_id}.*"), None)
+        media_type = "image/png" if path and path.suffix == ".png" else "text/plain"
+        return ArtifactContent(content, media_type, len(content))
+
+
+class BlobArtifactStore:
+    def __init__(
+        self,
+        account_url: str,
+        container_name: str,
+        service_client: Any | None = None,
+    ) -> None:
+        parsed_account_url = urlsplit(account_url)
+        hostname = parsed_account_url.hostname or ""
+        if (
+            parsed_account_url.scheme != "https"
+            or parsed_account_url.username is not None
+            or parsed_account_url.password is not None
+            or parsed_account_url.port not in (None, 443)
+            or parsed_account_url.path not in ("", "/")
+            or parsed_account_url.query
+            or parsed_account_url.fragment
+            or not re.fullmatch(
+                r"[a-z0-9](?:[a-z0-9]{1,22}[a-z0-9])?\.blob\.core\.windows\.net",
+                hostname,
+            )
+        ):
+            raise ValueError("Azure Storage account URL is invalid.")
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?", container_name):
+            raise ValueError("Blob container name is invalid.")
+        self._account_url = account_url
+        self._container_name = container_name
+        self._service_client = service_client
+
+    def save(self, content: bytes, media_type: str) -> Artifact:
+        if media_type != "image/png" or not content or len(content) > _MAX_WEB_ARTIFACT_BYTES:
+            raise ArtifactStorageError(
+                "artifact_unavailable", "The generated artifact could not be stored."
+            )
+
+        from azure.core.exceptions import ResourceExistsError
+        from azure.storage.blob import ContentSettings
+
+        with dependency_span("blob", "write") as span:
+            for _ in range(3):
+                artifact_id = str(uuid4())
+                blob_name = f"{artifact_id}.png"
+                try:
+                    self._container_client().get_blob_client(blob_name).upload_blob(
+                        content,
+                        overwrite=False,
+                        content_settings=ContentSettings(content_type="image/png"),
+                    )
+                except ResourceExistsError:
+                    continue
+                except Exception as error:
+                    translated_error = _translate_blob_error(error, "stored")
+                    record_span_outcome(
+                        span, "failed", error_code=translated_error.code
+                    )
+                    raise translated_error from None
+                record_span_outcome(
+                    span,
+                    "succeeded",
+                    attributes={"fantasy_cards.artifact_size_bytes": len(content)},
+                )
+                return Artifact(
+                    artifact_id=artifact_id,
+                    media_type="image/png",
+                    size_bytes=len(content),
+                    file_path=blob_name,
+                )
+            record_span_outcome(span, "failed", error_code="artifact_unavailable")
+            raise ArtifactStorageError(
+                "artifact_unavailable", "The generated artifact could not be stored."
+            )
+
+    def read(self, artifact_id: str) -> ArtifactContent:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        try:
+            canonical_id = str(__import__("uuid").UUID(artifact_id))
+        except (ValueError, AttributeError, TypeError):
+            raise ArtifactNotFoundError() from None
+        if canonical_id != artifact_id:
+            raise ArtifactNotFoundError()
+
+        with dependency_span("blob", "read") as span:
+            try:
+                downloader = self._container_client().get_blob_client(
+                    f"{artifact_id}.png"
+                ).download_blob(max_concurrency=1)
+                properties = downloader.properties
+                size_bytes = int(properties.size)
+                media_type = properties.content_settings.content_type
+                if (
+                    media_type != "image/png"
+                    or size_bytes < 1
+                    or size_bytes > _MAX_WEB_ARTIFACT_BYTES
+                ):
+                    raise ArtifactStorageError(
+                        "artifact_unavailable", "The requested artifact is unavailable."
+                    )
+                content = downloader.readall()
+            except ResourceNotFoundError:
+                record_span_outcome(span, "not_found", error_code="artifact_not_found")
+                raise ArtifactNotFoundError() from None
+            except ArtifactStorageError as error:
+                record_span_outcome(span, "failed", error_code=error.code)
+                raise
+            except Exception as error:
+                translated_error = _translate_blob_error(error, "read")
+                record_span_outcome(
+                    span, "failed", error_code=translated_error.code
+                )
+                raise translated_error from None
+            if len(content) != size_bytes:
+                record_span_outcome(span, "failed", error_code="artifact_unavailable")
+                raise ArtifactStorageError(
+                    "artifact_unavailable", "The requested artifact is unavailable."
+                )
+            record_span_outcome(
+                span,
+                "succeeded",
+                attributes={"fantasy_cards.artifact_size_bytes": size_bytes},
+            )
+            return ArtifactContent(content, media_type, size_bytes)
+
+    def _container_client(self) -> Any:
+        if self._service_client is None:
+            from azure.identity import DefaultAzureCredential
+            from azure.storage.blob import BlobServiceClient
+
+            self._service_client = BlobServiceClient(
+                account_url=self._account_url,
+                credential=DefaultAzureCredential(),
+            )
+        return self._service_client.get_container_client(self._container_name)
+
+
+def _translate_blob_error(error: Exception, action: str) -> ArtifactStorageError:
+    from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
+
+    if isinstance(error, ClientAuthenticationError) or getattr(
+        error, "status_code", None
+    ) in (401, 403):
+        return ArtifactStorageError(
+            "artifact_unavailable", "Artifact storage authorization failed."
+        )
+    if isinstance(error, HttpResponseError):
+        return ArtifactStorageError(
+            "artifact_unavailable", f"The generated artifact could not be {action}."
+        )
+    return ArtifactStorageError(
+        "artifact_unavailable", f"The generated artifact could not be {action}."
+    )
 
 
 class InMemoryJobRepository:

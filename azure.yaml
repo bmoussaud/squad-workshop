@@ -2,3 +2,11 @@ name: fantasy-cards
 infra:
   provider: bicep
   path: infra
+services:
+  web:
+    project: .
+    language: py
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: .

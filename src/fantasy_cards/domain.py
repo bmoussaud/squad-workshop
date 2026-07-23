@@ -36,6 +36,24 @@ class Artifact:
     file_path: str
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class ArtifactContent:
+    content: bytes
+    media_type: str
+    size_bytes: int
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, bytes):
+            return self.content == other
+        if not isinstance(other, ArtifactContent):
+            return NotImplemented
+        return (
+            self.content == other.content
+            and self.media_type == other.media_type
+            and self.size_bytes == other.size_bytes
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class GenerationJob:
     job_id: str

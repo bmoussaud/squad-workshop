@@ -20,3 +20,7 @@
 📌 Team update (2026-07-22T13:11:01+0000): Switch rejected Trinity's artifact persistence revision because UUID collisions can overwrite existing finalized artifacts and failed temporary writes can leave partial temp files. Strict lockout applies: Trinity may neither revise nor advise; Tank owns the next revision independently. — decided by Switch
 
 📌 Team update (2026-07-22T13:11:01+0000): Tank completed the artifact persistence revision independently while Trinity's lockout remained in force. Switch approved exact artifact-ID filenames, the png/txt/bin allowlist, atomic exclusive no-overwrite publication, guaranteed temporary cleanup, and post-success-only memory updates after 33 tests and repository checks passed. — decided by Switch
+
+📌 Team update (2026-07-23T08:27:28+0000): The initial FastAPI/Jinja2 application, Blob adapter, UI, configuration, and documentation reached Azure. The repaired revision is healthy at 100% traffic, but generation intentionally returns safe `503 artifact_unavailable` because policy-disabled Storage has no private route. — recorded by Scribe
+
+📌 Team update (2026-07-23T08:27:28+0000): Entra-authenticated Application Insights export requires explicit `ManagedIdentityCredential(client_id=AZURE_CLIENT_ID)` when local authentication is disabled; configured telemetry must remain isolated from default offline tests. Final test-isolation revision ownership moved independently under strict reviewer lockout. — recorded by Scribe

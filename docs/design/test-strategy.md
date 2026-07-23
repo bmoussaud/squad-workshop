@@ -1,43 +1,76 @@
-# Initial Test Strategy
+# Web Modernization Test Strategy
 
 ## Purpose
 
-This strategy is the executable quality contract for the first vertical slice. The
-implementation must remain an importable Python package with domain, application,
-port, and adapter boundaries. Its default test path must run with in-memory adapters,
-without network access, Azure credentials, or an image-provider SDK.
+This strategy is the executable quality contract for the CLI and approved web
+modernization. The implementation must remain an importable Python package with
+domain, application, port, and adapter boundaries. Its default test path runs with
+in-memory or mocked adapters, without network access, Azure credentials, or live
+image-provider and Blob SDK calls.
 
 Test names below are stable acceptance IDs. Trinity may map package imports to the
 scaffold's final package name, but should preserve the behavior and test IDs.
 
 ## Test Harness
 
-Use `pytest` and keep tests under these layers:
+The repository currently uses `unittest`-style tests, executable through discovery:
 
-```text
-tests/
-  unit/                 # Pure domain and application behavior
-  contract/             # Every adapter checked against its port contract
-  smoke/                # In-memory vertical slice
-  evaluation/           # Bounded nondeterministic image checks
+```bash
+uv run python -m unittest discover -s tests -v
 ```
 
 The default command must be deterministic and offline:
 
 ```bash
-python -m pytest -m "not live and not image_eval"
+uv run python -m unittest discover -s tests -v
 ```
 
-The curated image evaluation command is explicit and opt-in:
+Any future live Azure or nondeterministic image evaluation remains explicit and
+opt-in. Unit, contract, API, static-asset, and smoke tests must fail if they attempt
+DNS, sockets, subprocesses, or cloud credential discovery. Inject deterministic IDs,
+clocks, and blocking fakes where exact ordering or concurrency is asserted.
 
-```bash
-python -m pytest -m image_eval --image-eval-manifest tests/evaluation/fixtures/manifest.json
-```
+Telemetry contract tests must establish their environment and test doubles before
+the first `fantasy_cards.web` import. Offline cases clear inherited Application
+Insights configuration, evict the web and telemetry modules inside a restorable
+module sandbox, and block socket connection APIs. Configured cases install complete
+Azure Monitor and FastAPI instrumentation doubles before importing the web module;
+they verify that `ManagedIdentityCredential` receives the configured user-assigned
+identity client ID and that the resulting credential reaches the exporter. A
+connection string without `AZURE_CLIENT_ID` remains disabled rather than using
+local authentication. Tests may not construct a real credential/exporter or retain
+test modules after the sandbox exits.
 
-Tests marked `live` are never part of the initial acceptance gate. Unit, contract,
-and smoke tests must fail if they attempt DNS, sockets, subprocesses, or cloud
-credential discovery. Freeze time and inject deterministic ID generators where IDs
-or timestamps are asserted.
+## Web Acceptance Matrix
+
+| Surface | Required evidence |
+|---|---|
+| Initial HTML | Semantic landmarks, associated Card name and Description labels, server POST action, exact `maxlength` values, live result region, and repository-owned assets. |
+| Progressive enhancement | The normal form succeeds without JavaScript; JavaScript adds fetch, busy state, duplicate-submit prevention, success/error replacement, and does not own navigation. |
+| JSON API | Exact success DTO, canonical server correlation ID replacement, no idempotency key/path/provider leakage, and application artifact URL. |
+| Validation | Trimmed title 1-80 and description 1-1000 Unicode characters, printable ASCII idempotency key 1-128, JSON-only media type, and a hard 16 KiB body ceiling. |
+| Failures | Stable error envelope/codes, safe messages, canonical correlation IDs, and no prompt, endpoint, credential, response body, filesystem path, or Blob detail. |
+| Capacity | Attempt 11 in a 10/600-second window is rate limited; a second in-flight generation is immediately busy with `Retry-After: 30`. |
+| Artifacts | Canonical UUID allowlist, no redirects, `image/png`, exact length, private one-hour cache, and `nosniff`; invalid/absent IDs are 404. |
+| Health | Liveness is process-only; readiness validates composition only; neither performs credential discovery, network I/O, or generation. |
+| Blob contract | Token credential plus account URL, exact opaque `.png` names, conditional create, three collision attempts, 10 MiB/media bounds, UUID-before-network reads, safe failures, and no metadata/secrets. |
+| Artifact failures | Invalid and absent UUIDs are `404`; authorization, authentication, malformed content, and service failures are safe `503` responses with canonical correlation IDs and no provider detail. |
+| Telemetry | Import is a no-op without complete configuration; configured Azure Monitor initialization passes a lazily constructed UAMI credential; connection-string-only local-auth fallback is forbidden; provider and Blob failure events match alert fields and exclude titles, prompts, image bytes, endpoints, credentials, and response bodies. |
+| Deployment | `azure.yaml`, the non-root container command, Bicep identity/RBAC/private storage with an enabled service endpoint/retention, component-scoped telemetry publishing, ingress/probes/scaling/environment/outputs/diagnostics/budget/alerts, and telemetry-query alignment are checked structurally without full-file snapshots. |
+| Accessibility/responsive | Visible focus, touch-size controls, reduced motion, responsive media rules, bounded images, and horizontal-overflow protection. |
+| Regression | Existing CLI, configuration, generation service, Foundry adapter, compilation, and offline import behavior remain green. |
+
+HTTP acceptance tests intentionally exercise the public `create_app()` composition
+root rather than implementation helpers. Blob tests mock only the Azure SDK boundary
+and run without Azure authentication. Container and deployed-environment checks are
+separate validation gates; they do not replace local contract coverage.
+
+Deployment tests parse the small `azure.yaml` mapping by indentation and inspect
+named Bicep resource/module blocks with balanced-brace extraction. Assertions target
+security and runtime properties inside their owning resources rather than matching
+whole files or depending on whitespace-only snapshots. Alert-query properties must
+also appear in emitted structured telemetry so a syntactically present alert cannot
+silently target fields the application never produces.
 
 Shared fixtures should expose only provider-neutral ports:
 

@@ -1,0 +1,17 @@
+.azure/
+.git/
+.github/
+.squad/
+.venv/
+artifacts/
+build/
+dist/
+docs/
+infra/
+tests/
+**/__pycache__/
+*.egg-info/
+.env
+.env.*
+!.env.example
+*.pyc
