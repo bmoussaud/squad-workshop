@@ -14,3 +14,5 @@
 📌 Team update (2026-07-22T13:11:01+0000): Switch rejected Neo's second `gpt-image-2` revision because PNG validation accepts valid PNG data with trailing bytes and the ignored egg-info directory remains on disk. Trinity and Neo may neither revise nor advise; Tank owns the next revision independently. — decided by Switch
 
 📌 Team update (2026-07-22T13:11:01+0000): Tank's independent final `gpt-image-2` revision was approved by Switch with no findings after strict lockout was preserved. Exact terminal IEND validation now rejects trailing bytes, and repository hygiene checks confirm no egg-info artifacts. — decided by Switch
+
+📌 Team update (2026-07-22T16:01:59+0000): Independently validated `gpt-image-2` version `2026-04-21` in Sweden Central on `GlobalStandard`: proposed and live capacity 1, quota limit 2/current usage 1. Provisioning awaits explicit user approval, including acceptance of cross-geography processing and default content and abuse monitoring; no Azure resources were created. — decided by Morpheus, Tank, and Neo

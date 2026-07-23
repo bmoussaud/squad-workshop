@@ -1,0 +1,15 @@
+using './main.bicep'
+
+param location = 'swedencentral'
+param environmentName = 'dev-8f327f8c'
+param foundryAccountName = 'fnd-fantasy-cards-dev-8f327f8c'
+param foundryProjectName = 'prj-fantasy-cards-dev-8f327f8c'
+param platformIdentityName = 'id-fantasy-cards-platform-dev-8f327f8c'
+param applicationIdentityName = 'id-fantasy-cards-app-dev-8f327f8c'
+param logAnalyticsWorkspaceName = 'log-fantasy-cards-dev-8f327f8c'
+param applicationInsightsName = 'appi-fantasy-cards-dev-8f327f8c'
+param modelDeploymentName = 'gpt-image-2-dev'
+param modelName = 'gpt-image-2'
+param modelVersion = '2026-04-21'
+param modelSkuName = 'GlobalStandard'
+param modelCapacity = 1

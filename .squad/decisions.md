@@ -62,6 +62,11 @@
 **What:** APPROVE Tank's independent artifact persistence revision. Artifacts now expose `file_path`; `InMemoryArtifactStore` writes bytes beneath the configured output directory using the exact `artifact_id` filename and a `png`/`txt`/`bin` extension allowlist. Publication is atomic and exclusive, collisions never overwrite finalized files, temporary files are always cleaned up, and in-memory state updates only after successful publication. `FANTASY_CARD_OUTPUT_DIR`, CLI JSON output, and README documentation are updated.
 **Why:** Tank independently corrected the collision and temporary-cleanup defects while Trinity's reviewer lockout remained in force. Switch's final review approved the revision after 33 tests, `compileall`, `uv lock --check`, `git diff --check`, and a clean residue scan passed. No commit was created.
 
+### 2026-07-22T16:01:59+0000: Foundry provisioning prepared and awaiting explicit approval
+**By:** Morpheus, Tank, Neo
+**What:** The Bicep/azd target is prepared for subscription `external-bmoussaud-ms` in Sweden Central (`swedencentral`): resource group `rg-fantasy-cards-dev-8f327f8c`, Foundry account `fnd-fantasy-cards-dev-8f327f8c`, Foundry project `prj-fantasy-cards-dev-8f327f8c`, and model deployment `gpt-image-2-dev`. The validated model target is `gpt-image-2` version `2026-04-21` on `GlobalStandard`, proposed capacity 1. At validation time, live capacity was 1 and quota was limit 2/current usage 1. Azure provisioning is a billable gate and must not run until bmoussaud explicitly approves it. No Azure resources were created.
+**Why:** The design review established a coherent deployment lifecycle and an explicit approval boundary. Azure preflight and local validation passed, while Neo independently confirmed the exact regional model facts. Approval must also acknowledge cross-geography processing and default content and abuse monitoring before provisioning.
+
 ## Governance
 
 - All meaningful changes require team consensus

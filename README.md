@@ -69,13 +69,13 @@ The job JSON includes the persisted file location in `artifact.file_path`.
 Foundry image generation is opt-in and uses Microsoft Entra authentication. Configure an existing GPT-image deployment at runtime:
 
 ```bash
-export FANTASY_CARD_IMAGE_GENERATOR=foundry
-export AZURE_OPENAI_ENDPOINT="https://foundry-j7hqwc4422gp4.services.ai.azure.com/openai/v1"
-export AZURE_OPENAI_DEPLOYMENT_NAME="<gpt-image-2-deployment-name>"
-export FANTASY_CARD_IMAGE_TIMEOUT_SECONDS=60
+azd env get-values > .env
+printf '\nFANTASY_CARD_IMAGE_GENERATOR=foundry\n' >> .env
 azd auth login
 uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
 ```
+
+The CLI loads `.env` with `python-dotenv`. Existing shell variables take precedence, and `.env` is generated local state excluded from Git. Regenerate it after provisioning changes the `azd` outputs.
 
 `FANTASY_CARD_IMAGE_TIMEOUT_SECONDS` is optional and must be between 1 and 120 seconds. The client does not automatically retry image generation because a retry can duplicate provider charges.
 

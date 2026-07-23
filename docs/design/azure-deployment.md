@@ -14,7 +14,11 @@ This recommendation is conditional on the assumptions below. It is not a claim t
 
 ## Infrastructure as Code Standard
 
-Configure all Azure resources through Bicep. Prefer maintained Azure Verified Modules (AVM) whenever a suitable module exists. When no suitable AVM is available, author native Bicep; do not switch to ARM JSON, Terraform, or imperative CLI provisioning scripts. Use `.bicepparam` files for environment-specific parameter values.
+Configure all Azure resources through Bicep. Every project-owned `.bicep` file must declare `targetScope = 'resourceGroup'`; `ressourceGroup` is not valid Bicep syntax. The deployment orchestrator or calling context must create or select the containing resource group before invoking the templates.
+
+Use a maintained Azure Verified Module (AVM) before authoring a native resource declaration. Check both AVM resource and pattern modules, pin the selected module to an exact stable version, and preserve the intended security and lifecycle contract when mapping its parameters. Native Bicep is allowed only when no suitable AVM exists or every available AVM would materially change that contract; document the reason for each fallback. Do not switch to ARM JSON, Terraform, or imperative CLI provisioning scripts. Use `.bicepparam` files for environment-specific parameter values.
+
+The current Foundry project child resource is a documented native fallback: the Cognitive Services account AVM creates the account and model deployment but not the project, while the available AI Foundry pattern module would replace the approved user-assigned identity design with system-assigned identities.
 
 ## Application Deployment Orchestration
 

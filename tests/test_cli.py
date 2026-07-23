@@ -18,10 +18,22 @@ from fantasy_cards.config import ConfigurationError
 
 
 class CliTests(unittest.TestCase):
+    @patch("fantasy_cards.cli.load_dotenv")
+    def test_loads_dotenv_before_building_application(self, load_dotenv: Mock) -> None:
+        with patch("sys.argv", ["fantasy-card", "Title", "Prompt"]), patch(
+            "fantasy_cards.cli.build_local_application",
+            side_effect=RuntimeError("composition reached"),
+        ), self.assertRaisesRegex(RuntimeError, "composition reached"):
+            main()
+
+        load_dotenv.assert_called_once_with()
+
     def test_prints_a_successful_job(self) -> None:
         output = StringIO()
 
-        with TemporaryDirectory() as output_directory, patch.dict(
+        with patch(
+            "fantasy_cards.cli.load_dotenv"
+        ), TemporaryDirectory() as output_directory, patch.dict(
             "os.environ",
             {"FANTASY_CARD_OUTPUT_DIR": output_directory},
             clear=True,

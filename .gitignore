@@ -9,6 +9,9 @@
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
 node_modules
+.env
+.env.*
+!.env.example
 **/__pycache__/
 *.egg-info/
 build/

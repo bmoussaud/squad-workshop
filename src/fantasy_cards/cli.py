@@ -6,12 +6,15 @@ import sys
 from dataclasses import asdict
 from uuid import uuid4
 
+from dotenv import load_dotenv
+
 from fantasy_cards.adapters import ImageGenerationError, deterministic_idempotency_key
 from fantasy_cards.config import ConfigurationError, build_local_application
 from fantasy_cards.domain import CardGenerationRequest
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Generate a local fantasy card artifact")
     parser.add_argument("title")
     parser.add_argument("prompt")
