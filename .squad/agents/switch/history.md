@@ -28,3 +28,5 @@
 📌 Team update (2026-07-23T08:27:28+0000): Security review confirmed that management-group policy keeps Storage public access disabled and that private Blob recovery needs a separately approved VNet/private-endpoint/private-DNS replacement. The live repaired revision is healthy at 100% traffic, direct anonymous Blob access remains denied, and generation fails safely with `503 artifact_unavailable`. — recorded by Scribe
 
 📌 Team update (2026-07-23T08:27:28+0000): Strict reviewer lockout was enforced across telemetry revisions: rejected authors did not revise the same artifact, Neo independently repaired managed-identity telemetry/security, and @copilot independently fixed telemetry test isolation before final approval. — recorded by Scribe
+
+📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, with acceptance coverage for successful and provider-failed event metadata and no sensitive request or dependency values. — decided by Trinity, Switch

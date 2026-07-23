@@ -24,3 +24,5 @@
 📌 Team update (2026-07-23T08:27:28+0000): The initial FastAPI/Jinja2 application, Blob adapter, UI, configuration, and documentation reached Azure. The repaired revision is healthy at 100% traffic, but generation intentionally returns safe `503 artifact_unavailable` because policy-disabled Storage has no private route. — recorded by Scribe
 
 📌 Team update (2026-07-23T08:27:28+0000): Entra-authenticated Application Insights export requires explicit `ManagedIdentityCredential(client_id=AZURE_CLIENT_ID)` when local authentication is disabled; configured telemetry must remain isolated from default offline tests. Final test-isolation revision ownership moved independently under strict reviewer lockout. — recorded by Scribe
+
+📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, while startup logging records only telemetry configuration selection and OpenTelemetry events remain separate. — decided by Trinity, Switch

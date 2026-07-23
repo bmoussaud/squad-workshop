@@ -121,6 +121,7 @@ resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-06-01
   name: foundryAccountName
 }
 
+// native-bicep-fallback: The Cognitive Services account AVM does not create Foundry project child resources; the available Foundry pattern module replaces the approved user-assigned identity design with system-assigned identities.
 resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
   parent: foundryAccountResource
   name: foundryProjectName

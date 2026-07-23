@@ -6,6 +6,17 @@ import unittest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+INFRASTRUCTURE_ROOT = REPOSITORY_ROOT / "infra"
+PROJECT_BICEP_TEMPLATES = tuple(sorted(INFRASTRUCTURE_ROOT.glob("*.bicep")))
+EXPECTED_AVM_MODULES = (
+    "managed-identity/user-assigned-identity",
+    "operational-insights/workspace",
+    "insights/component",
+    "cognitive-services/account",
+    "container-registry/registry",
+    "storage/storage-account",
+    "app/container-app",
+)
 
 
 def parse_simple_yaml_mapping(source: str) -> dict[str, object]:
@@ -76,6 +87,67 @@ class DeploymentContractTests(unittest.TestCase):
         )
         cls.web_bicep = (REPOSITORY_ROOT / "infra/web.bicep").read_text(
             encoding="utf-8"
+        )
+        cls.foundry_bicep = (REPOSITORY_ROOT / "infra/foundry.bicep").read_text(
+            encoding="utf-8"
+        )
+        cls.azure_deployment_design = (
+            REPOSITORY_ROOT / "docs/design/azure-deployment.md"
+        ).read_text(encoding="utf-8")
+
+    def test_project_owned_bicep_uses_resource_group_scoped_avms_or_documented_fallbacks(self) -> None:
+        templates = {
+            template.relative_to(REPOSITORY_ROOT).as_posix(): template.read_text(
+                encoding="utf-8"
+            )
+            for template in PROJECT_BICEP_TEMPLATES
+        }
+        self.assertEqual(
+            set(templates),
+            {"infra/foundry.bicep", "infra/main.bicep", "infra/web.bicep"},
+        )
+        for template_name, template in templates.items():
+            self.assertRegex(
+                template,
+                r"(?m)^targetScope\s*=\s*'resourceGroup'\s*$",
+                msg=f"{template_name} must be resource-group scoped",
+            )
+
+        avm_references = "\n".join(templates.values())
+        for module in EXPECTED_AVM_MODULES:
+            self.assertRegex(
+                avm_references,
+                rf"(?m)^\s*module\s+\w+\s+'br/(?:public:)?avm/res/{re.escape(module)}:\d+\.\d+\.\d+'",
+                msg=f"Missing an exact-version AVM reference for {module}",
+            )
+
+        self.assertIn("Azure Verified Modules (AVM) first", self.azure_deployment_design)
+        self.assertNotIn(
+            "Azure Verified Modules (AVM) must not be used", self.azure_deployment_design
+        )
+        self.assertNotIn(
+            "Use native Bicep resource declarations for all project-owned infrastructure.",
+            self.azure_deployment_design,
+        )
+
+        direct_resources = {
+            f"{template_name}/{resource_name}"
+            for template_name, template in templates.items()
+            for resource_name in re.findall(
+            r"(?m)^\s*resource\s+(\w+)\s+'Microsoft\.[^']+'\s*=", template
+            )
+        }
+        documented_fallbacks = set(
+            re.findall(
+                r"(?m)^<!-- native-bicep-fallback: "
+                r"(infra/[\w.-]+\.bicep/\w+) \| Microsoft\.[^|]+ \| .+ -->$",
+                self.azure_deployment_design,
+            )
+        )
+        self.assertSetEqual(
+            documented_fallbacks,
+            direct_resources,
+            "Each direct resource must have one documented native-Bicep fallback rationale",
         )
 
     def test_azd_declares_only_the_approved_web_container_app_service(self) -> None:
@@ -151,10 +223,8 @@ class DeploymentContractTests(unittest.TestCase):
         )
 
     def test_storage_identity_and_rbac_are_private_and_least_privilege(self) -> None:
-        storage = extract_bicep_block(self.web_bicep, "resource", "storageAccount")
-        container = extract_bicep_block(self.web_bicep, "resource", "artifactContainer")
-        lifecycle = extract_bicep_block(self.web_bicep, "resource", "storageLifecycle")
-        app = extract_bicep_block(self.web_bicep, "resource", "containerApp")
+        storage = extract_bicep_block(self.web_bicep, "module", "storageAccount")
+        app = extract_bicep_block(self.web_bicep, "module", "containerApp")
         acr_role = extract_bicep_block(self.web_bicep, "resource", "acrPullAssignment")
         blob_role = extract_bicep_block(self.web_bicep, "resource", "blobDataAssignment")
         telemetry_role = extract_bicep_block(
@@ -170,11 +240,11 @@ class DeploymentContractTests(unittest.TestCase):
             "publicNetworkAccess: 'Enabled'",
         ):
             self.assertIn(contract, storage)
-        self.assertIn("publicAccess: 'None'", container)
-        self.assertIn("daysAfterCreationGreaterThan: 30", lifecycle)
-        self.assertIn("blobTypes:", lifecycle)
-        self.assertIn("'blockBlob'", lifecycle)
-        self.assertIn("type: 'UserAssigned'", app)
+        self.assertIn("publicAccess: 'None'", storage)
+        self.assertIn("daysAfterCreationGreaterThan: 30", storage)
+        self.assertIn("blobTypes:", storage)
+        self.assertIn("'blockBlob'", storage)
+        self.assertIn("userAssignedResourceIds:", app)
         self.assertIn("applicationIdentityResourceId", app)
         self.assertIn("scope: containerRegistry", acr_role)
         self.assertIn("acrPullRoleDefinitionId", acr_role)
@@ -189,16 +259,16 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
 
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
-        app = extract_bicep_block(self.web_bicep, "resource", "containerApp")
+        app = extract_bicep_block(self.web_bicep, "module", "containerApp")
         for contract in (
             "workloadProfileName: 'dedicated'",
-            "allowInsecure: false",
-            "external: true",
-            "targetPort: 8000",
+            "ingressAllowInsecure: false",
+            "ingressExternal: true",
+            "ingressTargetPort: 8000",
             "path: '/health/live'",
             "path: '/health/ready'",
-            "minReplicas: 1",
-            "maxReplicas: 2",
+            "scaleMinReplicas: 1",
+            "scaleMaxReplicas: 2",
             "concurrentRequests: '1'",
         ):
             self.assertIn(contract, app)
@@ -231,7 +301,6 @@ class DeploymentContractTests(unittest.TestCase):
             "environmentDiagnostics",
             "appDiagnostics",
             "registryDiagnostics",
-            "storageDiagnostics",
             "actionGroup",
             "resourceGroupBudget",
             "http5xxAlert",

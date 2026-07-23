@@ -89,6 +89,12 @@ Run the tests with:
 uv run python -m unittest discover -s tests -v
 ```
 
+## Contribution workflow
+
+`main` is the protected release branch. Every change must have a single owning GitHub issue and follow one issue, one branch, one worktree, and one pull request. Create the issue branch as `squad/{issue-number}-{kebab-case-slug}`; use a dedicated worktree when work is concurrent.
+
+Do not push directly to `main`. Open a pull request that closes its owning issue, obtain the required review, and keep the branch current with `main` before merge. The required `validate` CI check must be green. Merge pull requests one at a time when GitHub merge queue or merge serialization is available, then remove the merged issue branch and its worktree.
+
 ## Validate changes locally
 
 Run the same validation gates as CI from the repository root, in this order:

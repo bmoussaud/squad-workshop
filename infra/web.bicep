@@ -28,54 +28,44 @@ var containerAppsEnvironmentName = 'cae-fantasy-cards-${environmentName}'
 var containerRegistryName = 'acrfantasycards${resourceToken}'
 var storageAccountName = 'stfc${resourceToken}'
 var blobContainerName = 'artifacts'
-var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-var blobDataContributorRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 var monitoringMetricsPublisherRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
 	name: last(split(applicationInsightsResourceId, '/'))
 }
 
-resource containerRegistry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
-	name: containerRegistryName
-	location: location
-	tags: tags
-	sku: {
-		name: 'Basic'
-	}
-	properties: {
-		adminUserEnabled: false
+module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' = {
+	params: {
+		name: containerRegistryName
+		location: location
+		tags: tags
+		acrSku: 'Basic'
+		acrAdminUserEnabled: false
 		anonymousPullEnabled: false
 		dataEndpointEnabled: false
 		publicNetworkAccess: 'Enabled'
-		policies: {
-			azureADAuthenticationAsArmPolicy: {
-				status: 'enabled'
+		azureADAuthenticationAsArmPolicyStatus: 'enabled'
+		quarantinePolicyStatus: 'disabled'
+		retentionPolicyStatus: 'disabled'
+		retentionPolicyDays: 7
+		trustPolicyStatus: 'disabled'
+		enableTelemetry: false
+		roleAssignments: [
+			{
+				principalId: applicationIdentityPrincipalId
+				roleDefinitionIdOrName: 'AcrPull'
+				description: 'Allow the fantasy cards application identity to pull container images from the registry.'
 			}
-			quarantinePolicy: {
-				status: 'disabled'
-			}
-			retentionPolicy: {
-				days: 7
-				status: 'disabled'
-			}
-			trustPolicy: {
-				status: 'disabled'
-				type: 'Notary'
-			}
-		}
+		]
 	}
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2025-01-01' = {
-	name: storageAccountName
-	location: location
-	tags: tags
-	kind: 'StorageV2'
-	sku: {
-		name: 'Standard_LRS'
-	}
-	properties: {
+module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
+	params: {
+		name: storageAccountName
+		location: location
+		tags: tags
+		skuName: 'Standard_LRS'
 		accessTier: 'Hot'
 		allowBlobPublicAccess: false
 		allowCrossTenantReplication: false
@@ -85,66 +75,94 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2025-01-01' = {
 		minimumTlsVersion: 'TLS1_2'
 		publicNetworkAccess: 'Enabled'
 		supportsHttpsTrafficOnly: true
-	}
-}
-
-resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2025-01-01' = {
-	parent: storageAccount
-	name: 'default'
-	properties: {
-		containerDeleteRetentionPolicy: {
-			days: 7
-			enabled: true
-		}
-		deleteRetentionPolicy: {
-			allowPermanentDelete: false
-			days: 7
-			enabled: true
-		}
-	}
-}
-
-resource artifactContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2025-01-01' = {
-	parent: blobService
-	name: blobContainerName
-	properties: {
-		publicAccess: 'None'
-	}
-}
-
-resource storageLifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2025-01-01' = {
-	parent: storageAccount
-	name: 'default'
-	properties: {
-		policy: {
-			rules: [
-				{
-					name: 'delete-artifacts-after-30-days'
-					type: 'Lifecycle'
-					enabled: true
-					definition: {
-						actions: {
-							baseBlob: {
-								delete: {
-									daysAfterCreationGreaterThan: 30
-								}
+		managementPolicyRules: [
+			{
+				name: 'delete-artifacts-after-30-days'
+				type: 'Lifecycle'
+				enabled: true
+				definition: {
+					actions: {
+						baseBlob: {
+							delete: {
+								daysAfterCreationGreaterThan: 30
 							}
 						}
-						filters: {
-							blobTypes: [
-								'blockBlob'
-							]
-							prefixMatch: [
-								'${blobContainerName}/'
-							]
-						}
 					}
+					filters: {
+						blobTypes: [
+							'blockBlob'
+						]
+						prefixMatch: [
+							'${blobContainerName}/'
+						]
+					}
+				}
+			}
+		]
+		roleAssignments: [
+			{
+				principalId: applicationIdentityPrincipalId
+				roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+			}
+			 {
+        principalId: deployer().objectId
+        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        principalType: 'User'
+      }
+		]
+		blobServices: {
+			containerDeleteRetentionPolicyEnabled: true
+			containerDeleteRetentionPolicyDays: 7
+			deleteRetentionPolicyEnabled: true
+			deleteRetentionPolicyDays: 7
+			deleteRetentionPolicyAllowPermanentDelete: false
+			containers: [
+				{
+					name: blobContainerName
+					publicAccess: 'None'
+				}
+			]
+			diagnosticSettings: [
+				{
+					name: 'send-to-log-analytics'
+					workspaceResourceId: logAnalyticsWorkspaceResourceId
+					logAnalyticsDestinationType: 'Dedicated'
+					logCategoriesAndGroups: [
+						{
+							categoryGroup: 'allLogs'
+						}
+					]
+					metricCategories: [
+						{
+							category: 'Transaction'
+						}
+					]
 				}
 			]
 		}
+		enableTelemetry: false
 	}
 }
 
+resource containerRegistryResource 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = {
+	name: containerRegistryName
+}
+
+resource storageAccountResource 'Microsoft.Storage/storageAccounts@2025-01-01' existing = {
+	name: storageAccountName
+}
+
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2025-01-01' existing = {
+	parent: storageAccountResource
+	name: 'default'
+}
+
+resource artifactContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2025-01-01' existing = {
+	parent: blobService
+	name: blobContainerName
+}
+
+// native-bicep-fallback: The maintained managed-environment AVM requires a Log Analytics shared key for app logs, which violates the approved secretless telemetry contract.
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
 	name: containerAppsEnvironmentName
 	location: location
@@ -166,38 +184,32 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-
 	}
 }
 
-resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
-	name: containerAppName
-	location: location
-	tags: union(tags, {
-		'azd-service-name': 'web'
-	})
-	identity: {
-		type: 'UserAssigned'
-		userAssignedIdentities: {
-			'${applicationIdentityResourceId}': {}
-		}
-	}
-	properties: {
-		environmentId: containerAppsEnvironment.id
-		workloadProfileName: 'dedicated'
-		configuration: {
-			activeRevisionsMode: 'Single'
-			ingress: {
-				allowInsecure: false
-				external: true
-				targetPort: 8000
-				transport: 'auto'
-			}
-			registries: [
-				{
-					identity: applicationIdentityResourceId
-					server: containerRegistry.properties.loginServer
-				}
+module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
+	params: {
+		name: containerAppName
+		location: location
+		tags: union(tags, {
+			'azd-service-name': 'web'
+		})
+		managedIdentities: {
+			userAssignedResourceIds: [
+				applicationIdentityResourceId
 			]
 		}
-		template: {
-			containers: [
+		environmentResourceId: containerAppsEnvironment.id
+		workloadProfileName: 'dedicated'
+		activeRevisionsMode: 'Single'
+		ingressAllowInsecure: false
+		ingressExternal: true
+		ingressTargetPort: 8000
+		ingressTransport: 'auto'
+		registries: [
+				{
+					identity: applicationIdentityResourceId
+					server: containerRegistry.outputs.loginServer
+				}
+			]
+		containers: [
 				{
 					name: 'web'
 					image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -228,7 +240,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
 						}
 						{
 							name: 'AZURE_STORAGE_ACCOUNT_URL'
-							value: storageAccount.properties.primaryEndpoints.blob
+							value: storageAccount.outputs.primaryBlobEndpoint
 						}
 						{
 							name: 'FANTASY_CARD_BLOB_CONTAINER'
@@ -286,11 +298,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
 						}
 					]
 				}
-			]
-			scale: {
-				minReplicas: 1
-				maxReplicas: 2
-				rules: [
+		]
+		scaleMinReplicas: 1
+		scaleMaxReplicas: 2
+		scaleRules: [
 					{
 						name: 'http-concurrency'
 						http: {
@@ -299,34 +310,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
 							}
 						}
 					}
-				]
-			}
-		}
+		]
 	}
+	
 }
 
-resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-	scope: containerRegistry
-	name: guid(containerRegistry.id, applicationIdentityPrincipalId, acrPullRoleDefinitionId)
-	properties: {
-		principalId: applicationIdentityPrincipalId
-		principalType: 'ServicePrincipal'
-		roleDefinitionId: acrPullRoleDefinitionId
-		description: 'Allow the fantasy cards application identity to pull runtime images.'
-	}
+resource containerAppResource 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
+	name: containerAppName
 }
 
-resource blobDataAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-	scope: artifactContainer
-	name: guid(artifactContainer.id, applicationIdentityPrincipalId, blobDataContributorRoleDefinitionId)
-	properties: {
-		principalId: applicationIdentityPrincipalId
-		principalType: 'ServicePrincipal'
-		roleDefinitionId: blobDataContributorRoleDefinitionId
-		description: 'Allow the fantasy cards application identity to read and write generated artifacts.'
-	}
-}
 
+
+// native-bicep-fallback: No selected AVM exposes the required Application Insights component scope.
 resource monitoringMetricsPublisherAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 	scope: applicationInsights
 	name: guid(applicationInsights.id, applicationIdentityPrincipalId, monitoringMetricsPublisherRoleDefinitionId)
@@ -338,6 +333,7 @@ resource monitoringMetricsPublisherAssignment 'Microsoft.Authorization/roleAssig
 	}
 }
 
+// native-bicep-fallback: The selected managed-environment AVM is unsuitable because it requires a shared key; this diagnostic setting remains tied to the native environment fallback.
 resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
 	scope: containerAppsEnvironment
 	name: 'send-to-log-analytics'
@@ -359,8 +355,9 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 	}
 }
 
+// native-bicep-fallback: The Container App AVM does not expose the required app diagnostic-setting configuration.
 resource appDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
-	scope: containerApp
+	scope: containerAppResource
 	name: 'send-to-log-analytics'
 	properties: {
 		workspaceId: logAnalyticsWorkspaceResourceId
@@ -374,8 +371,9 @@ resource appDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-previe
 	}
 }
 
+// native-bicep-fallback: The registry diagnostic setting preserves the current dedicated Log Analytics destination and category selection.
 resource registryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
-	scope: containerRegistry
+	scope: containerRegistryResource
 	name: 'send-to-log-analytics'
 	properties: {
 		workspaceId: logAnalyticsWorkspaceResourceId
@@ -395,27 +393,7 @@ resource registryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-p
 	}
 }
 
-resource storageDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
-	scope: blobService
-	name: 'send-to-log-analytics'
-	properties: {
-		workspaceId: logAnalyticsWorkspaceResourceId
-		logAnalyticsDestinationType: 'Dedicated'
-		logs: [
-			{
-				categoryGroup: 'allLogs'
-				enabled: true
-			}
-		]
-		metrics: [
-			{
-				category: 'Transaction'
-				enabled: true
-			}
-		]
-	}
-}
-
+// native-bicep-fallback: No suitable selected AVM preserves the approved email-receiver and alert-action contract.
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
 	name: 'ag-fantasy-cards-${environmentName}'
 	location: 'global'
@@ -431,6 +409,7 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
 	}
 }
 
+// native-bicep-fallback: No maintained AVM resource module supports the required resource-group budget notification contract.
 resource resourceGroupBudget 'Microsoft.Consumption/budgets@2024-08-01' = {
 	name: 'budget-fantasy-cards-${environmentName}'
 	properties: {
@@ -484,6 +463,7 @@ resource resourceGroupBudget 'Microsoft.Consumption/budgets@2024-08-01' = {
 	}
 }
 
+// native-bicep-fallback: No suitable AVM preserves this application-specific KQL alert query.
 resource http5xxAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-preview' = if (enableApplicationSignalAlerts) {
 	name: 'alert-fantasy-cards-http-5xx-${environmentName}'
 	location: location
@@ -523,6 +503,7 @@ resource http5xxAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-preview
 	}
 }
 
+// native-bicep-fallback: No suitable AVM preserves this application-specific KQL alert query.
 resource readinessAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-preview' = if (enableApplicationSignalAlerts) {
 	name: 'alert-fantasy-cards-readiness-${environmentName}'
 	location: location
@@ -562,6 +543,7 @@ resource readinessAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-previ
 	}
 }
 
+// native-bicep-fallback: No suitable AVM preserves this application-specific KQL alert query.
 resource providerAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-preview' = if (enableApplicationSignalAlerts) {
 	name: 'alert-fantasy-cards-provider-${environmentName}'
 	location: location
@@ -601,6 +583,7 @@ resource providerAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-previe
 	}
 }
 
+// native-bicep-fallback: No suitable AVM preserves this application-specific KQL alert query.
 resource blobFailureAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-preview' = if (enableApplicationSignalAlerts) {
 	name: 'alert-fantasy-cards-blob-${environmentName}'
 	location: location
@@ -640,6 +623,7 @@ resource blobFailureAlert 'Microsoft.Insights/scheduledQueryRules@2025-01-01-pre
 	}
 }
 
+// native-bicep-fallback: No suitable AVM preserves the Container Apps replica metric and approved threshold contract.
 resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 	name: 'alert-fantasy-cards-replicas-${environmentName}'
 	location: 'global'
@@ -651,7 +635,7 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 		evaluationFrequency: 'PT1M'
 		windowSize: 'PT5M'
 		scopes: [
-			containerApp.id
+			containerAppResource.id
 		]
 		autoMitigate: true
 		criteria: {
@@ -677,9 +661,9 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 	}
 }
 
-output serviceUri string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
-output containerAppName string = containerApp.name
+output serviceUri string = 'https://${containerApp.outputs.fqdn}'
+output containerAppName string = containerApp.outputs.name
 output containerAppsEnvironmentName string = containerAppsEnvironment.name
-output containerRegistryEndpoint string = containerRegistry.properties.loginServer
-output storageAccountUrl string = storageAccount.properties.primaryEndpoints.blob
+output containerRegistryEndpoint string = containerRegistry.outputs.loginServer
+output storageAccountUrl string = storageAccount.outputs.primaryBlobEndpoint
 output blobContainerName string = artifactContainer.name

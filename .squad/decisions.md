@@ -82,6 +82,16 @@
 **What:** The initial proposal to restore authenticated public Blob reachability is superseded because management-group policy enforces Storage `publicNetworkAccess=Disabled`. Recovery therefore requires a parallel external workload-profiles Container Apps environment attached at creation to a delegated `/27` infrastructure subnet, a separate `/28` private-endpoint subnet, one Blob private endpoint, and `privatelink.blob.core.windows.net` private DNS with VNet link and zone group. Reuse the existing private Storage container, application UAMI, and exact RBAC scopes; retain public Container Apps ingress. Create `-private` environment/app resources, validate before cutover, retain the old environment for rollback, and decommission only with separate approval. The user selected hold state unchanged, so no private-network implementation or destructive cost stop is authorized. The repaired application revision may remain live in degraded mode, but generation is not accepted until private Blob connectivity passes.
 **Why:** Live ARM showed a non-VNet D4 Container Apps environment and no private route to policy-disabled Storage. Service endpoints cannot satisfy `publicNetworkAccess=Disabled`, and the current environment cannot gain VNet integration in place. Parallel replacement is the smallest policy-compliant recovery but temporarily doubles D4 cost and adds private endpoint/DNS cost, requiring explicit approval. Holding preserves the healthy application endpoint and security posture while leaving safe `503 artifact_unavailable` generation behavior and ongoing D4 charges explicit.
 
+### 2026-07-23T14:02:52+0000: Safe INFO generation lifecycle logging (consolidated)
+**By:** Trinity, Switch
+**What:** The web boundary emits one structured INFO `generation_completed` record for each completed generation attempt. Records contain only `correlation_id`, `outcome`, `success`, and `duration_ms`; successful attempts additionally include `size_bytes`, and provider failures include `dependency: "provider"` and a stable `error_code`. Startup logging reports only whether telemetry configuration was selected. OpenTelemetry lifecycle events remain separate. Structured messages and logging dimensions must exclude titles, prompts, endpoints, provider details, credentials, and image bytes.
+**Why:** The web boundary has the final outcome and artifact size, so this contract provides deterministic operational traceability for successful and provider-failed requests without exposing request, dependency, identity, or artifact-sensitive data. Focused acceptance tests enforce the safe event shape.
+
+### 2026-07-23T14:05:36+0000: AVM-first Bicep policy correction supersedes no-AVM directive
+**By:** bmoussaud (via Copilot)
+**What:** Supersede the accidental native-only/no-AVM instruction recorded during this session. All project-owned Bicep resource implementations must use exact-version Azure Verified Modules. Native Bicep is allowed only when no suitable maintained AVM preserves the required contract, and each fallback must be documented.
+**Why:** User correction establishing the mandatory Azure infrastructure implementation policy and its explicit exception process.
+
 ## Governance
 
 - All meaningful changes require team consensus
