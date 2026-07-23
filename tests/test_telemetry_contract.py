@@ -69,13 +69,18 @@ class TelemetryContractTests(unittest.TestCase):
     def test_import_without_connection_string_is_a_telemetry_noop(self) -> None:
         configure = Mock(side_effect=AssertionError("telemetry must remain disabled"))
         instrument = Mock(side_effect=AssertionError("instrumentation must remain disabled"))
-        with self.isolated_web_import(self.environment, configure, instrument) as module:
+        with self.isolated_web_import(self.environment, configure, instrument) as module, patch(
+            "fantasy_cards.telemetry._LOGGER.info"
+        ) as info:
             second_app = module.create_app()
 
         self.assertIsNotNone(module.app)
         self.assertIsNotNone(second_app)
         configure.assert_not_called()
         instrument.assert_not_called()
+        info.assert_called_once_with(
+            '{"event":"telemetry_configuration_selected","outcome":"disabled"}'
+        )
 
     def test_connection_string_initializes_azure_monitor_once_with_test_double(self) -> None:
         from fastapi.testclient import TestClient
