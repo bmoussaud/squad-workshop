@@ -22,15 +22,16 @@
         "GitHub.copilot",
         "GitHub.copilot-chat",
         "ms-azuretools.azure-dev",
-				"ms-azuretools.vscode-bicep",
-				"ms-python.python",
-				"ms-python.vscode-pylance",
-				"GitHub.vscode-github-actions",
-				"ms-azuretools.vscode-azure-github-copilot",
-				"esbenp.prettier-vscode",
-				"ms-azuretools.vscode-docker",
-				"ms-python.autopep8",
-				"AdilElKanabi.cost-lens-for-github-copilot"
+        "ms-azuretools.vscode-bicep",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "GitHub.vscode-github-actions",
+        "ms-azuretools.vscode-azure-github-copilot",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker",
+        "ms-python.autopep8",
+        "AdilElKanabi.cost-lens-for-github-copilot",
+        "JakubJirak.copilot-cost-lens"
       ]
     }
   }
