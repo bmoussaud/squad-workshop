@@ -88,3 +88,18 @@ Run the tests with:
 ```bash
 uv run python -m unittest discover -s tests -v
 ```
+
+## Validate changes locally
+
+Run the same validation gates as CI from the repository root, in this order:
+
+```bash
+test -z "$(find . -path './.git' -prune -o -path './.venv' -prune -o -type d -name '*.egg-info' -print -quit)"
+uv sync --locked
+uv run python -m unittest discover -s tests -v
+uv run python -m compileall -q src tests
+uv lock --check
+git diff --check "$(git merge-base origin/main HEAD)"
+```
+
+The generated-package residue check runs before environment synchronization so it inspects the checked-out repository rather than build output created by tooling. The whitespace check validates committed and uncommitted changes since the current branch diverged from `origin/main`; fetch `origin/main` first when the local remote-tracking branch is stale.
