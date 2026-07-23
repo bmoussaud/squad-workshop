@@ -1,6 +1,33 @@
 # Azure Deployment Design
 
-Status: proposed for validation; no infrastructure implementation is authorized by this document.
+Status: implemented locally; awaiting Azure Validate and separate deployment approval.
+
+## Implemented Deployment Contract
+
+The approved web-hosting slice is represented by `azure.yaml`, `infra/main.bicep`, `infra/web.bicep`, `infra/main.bicepparam`, and the repository-root `Dockerfile`.
+
+- The azd service name is `web`, with repository-root project/build context and Azure Container Apps hosting.
+- The Container Apps environment contains only a dedicated workload profile named `dedicated`; its exact type and instance bounds remain required validation inputs and cannot fall back to Consumption.
+- The Container App exposes HTTPS ingress on port 8000, runs one Uvicorn worker with total HTTP concurrency limited to 16, keeps one to two replicas, scales at one concurrent HTTP request per replica, and probes `/health/live` and `/health/ready`.
+- The existing application user-assigned identity is attached to the app and receives deterministic `AcrPull` at registry scope, `Storage Blob Data Contributor` at the private artifact-container scope, and `Monitoring Metrics Publisher` at the Application Insights component scope. Registry admin credentials, Storage shared keys, anonymous image pull, anonymous Blob access, storage connection strings, and SAS tokens are disabled or absent.
+- Storage is general-purpose v2 `Standard_LRS`; the private `artifacts` container deletes block blobs 30 days after creation. Its public service endpoint is retained because the Container App has no approved private network topology; data access still requires Microsoft Entra authorization.
+- Existing Log Analytics and Application Insights resources are reused. Application Insights keeps local authentication disabled; Azure Monitor OpenTelemetry uses the application UAMI selected by `AZURE_CLIENT_ID`, while its connection string supplies telemetry routing metadata. Container Apps environment/app, registry, and Blob diagnostics target the existing workspace.
+- A resource-group monthly budget sends actual-spend notifications at 50%, 80%, and 100% through one action group. Budget amount and recipients remain mandatory environment inputs.
+- Alert resources cover HTTP 5xx, readiness, provider, Blob, and replica-ceiling conditions. FastAPI request spans populate `AppRequests`; structured application logs populate `AppTraces` properties `dependency`, `success`, and `error_code`. Provider alerts select the `provider` dependency and authentication, throttle, timeout, and unavailable codes; Blob alerts select failed `blob` dependency events. Application-signal alerts remain disabled until Azure Validate confirms these tables and KQL property projections in the target workspace. The replica alert is enabled but still requires metric availability validation.
+
+The Bicep parameter file intentionally reads unresolved deployment facts from environment variables:
+
+| Variable | Validation purpose |
+| --- | --- |
+| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_TYPE` | Exact France Central dedicated profile type/SKU |
+| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MIN_COUNT` / `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MAX_COUNT` | Approved profile capacity bounds |
+| `AZURE_CONTAINER_APP_CPU` / `AZURE_CONTAINER_APP_MEMORY` | App allocation compatible with the selected profile |
+| `AZURE_MONTHLY_BUDGET_AMOUNT` | Approved monthly amount in billing currency |
+| `AZURE_BUDGET_START_DATE` | Deterministic ISO 8601 budget start aligned to the first day of a month |
+| `AZURE_ALERT_CONTACT_EMAILS` | Semicolon-separated notification recipients |
+| `AZURE_ENABLE_APPLICATION_SIGNAL_ALERTS` | `true` only after alert query/table validation; otherwise `false` |
+
+No tenant, subscription, profile capacity, budget, alert support, model capacity, or pricing value is inferred by the implementation. Provisioning and deployment remain prohibited until Azure Validate confirms those inputs and a non-mutating preview, and the user separately approves the billable action.
 
 ## Decision Summary
 
@@ -91,7 +118,7 @@ Development should use the filesystem adapter for pure unit tests and **Azurite*
 - Grant data-plane roles at resource or container scope. Azure resource ownership does not itself grant Blob data access.
 - Put only non-secret settings in Container Apps environment variables.
 - Use Microsoft Entra authentication and Azure RBAC for Microsoft Foundry where supported. Store only model-provider credentials that cannot use federation in an Azure Key Vault Standard vault dedicated to this application and environment. Grant the application identity **Key Vault Secrets User** at vault scope. Container Apps can expose a Key Vault-backed secret reference to the container.
-- Prefer direct Microsoft Entra authentication for Azure Storage, monitoring integrations, and a future Azure queue. Do not store Azure Storage connection strings when managed identity is supported.
+- Prefer direct Microsoft Entra authentication for Azure Storage, monitoring integrations, and a future Azure queue. For Application Insights ingestion with local authentication disabled, pass `ManagedIdentityCredential(client_id=AZURE_CLIENT_ID)` to Azure Monitor OpenTelemetry and grant `Monitoring Metrics Publisher` only at the component scope. Do not store Azure Storage connection strings when managed identity is supported.
 - Separate development and production identities, vaults, storage containers/accounts, Foundry projects/deployments, and telemetry resources as the eventual environment design requires. Do not let a development identity read production artifacts or invoke production model deployments.
 - Use separate user-assigned identities when components need materially different permissions or isolation boundaries; stable reuse is not a reason to broaden access. Preserve least privilege and scope each role assignment as narrowly as the service supports.
 - Define secret rotation and provider-key revocation tests. Key Vault storage alone does not prove that the application picks up a rotated secret safely.

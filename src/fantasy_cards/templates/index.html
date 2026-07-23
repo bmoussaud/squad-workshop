@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Fantasy Card Generator</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="wordmark" href="/" aria-label="Fantasy Card Generator home">
+      <span class="wordmark-mark" aria-hidden="true">FC</span>
+      <span>Fantasy Card Generator</span>
+    </a>
+  </header>
+
+  <main class="workspace">
+    <section class="generator" aria-labelledby="generator-heading">
+      <div class="section-heading">
+        <p class="eyebrow">Forge a new card</p>
+        <h1 id="generator-heading">Bring a character to life</h1>
+        <p>Give the card a name and describe its appearance, mood, and setting.</p>
+      </div>
+
+      <form id="generation-form" action="/generations" method="post">
+        <div class="field">
+          <label for="title">Card name</label>
+          <input id="title" name="title" type="text" value="{{ title }}" required minlength="1" maxlength="80" autocomplete="off">
+          <span class="field-note">Up to 80 characters</span>
+        </div>
+
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description" name="description" required minlength="1" maxlength="1000" rows="8">{{ description }}</textarea>
+          <span class="field-note">Appearance, pose, environment, and atmosphere</span>
+        </div>
+
+        <button class="primary-action" type="submit">
+          <span class="button-label">Generate card</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+        <p id="generation-status" class="status" aria-live="polite" aria-atomic="true">{% if error %}{{ error }}{% endif %}</p>
+      </form>
+    </section>
+
+    <section id="result-region" class="result" aria-labelledby="result-heading" aria-live="polite">
+      <div class="result-heading">
+        <p class="eyebrow">Latest creation</p>
+        <h2 id="result-heading">{% if result %}{{ result.title }}{% else %}Your card will appear here{% endif %}</h2>
+      </div>
+      {% if result %}
+      <figure class="card-result">
+        <img src="{{ result.artifact_url }}" alt="Generated fantasy card for {{ result.title }}">
+        <figcaption>
+          <span class="success-mark" aria-hidden="true">&#10003;</span>
+          <span>Generation {{ result.status }}</span>
+        </figcaption>
+      </figure>
+      <a class="secondary-action" href="/">Generate another card</a>
+      {% else %}
+      <div class="empty-state" aria-hidden="true">
+        <span class="empty-glyph">&#10022;</span>
+        <span>Awaiting a new legend</span>
+      </div>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer>
+    <span>Original cards generated from your description</span>
+  </footer>
+</body>
+</html>

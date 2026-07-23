@@ -22,6 +22,16 @@
 **What:** Use the Azure Developer CLI (`azd`) and `azure.yaml` to manage application deployment to Azure. Authenticate the shell to the Azure subscription with `azd auth login`; Azure CLI authentication with `az login` is available as a fallback.
 **Why:** User directive establishing the project's Azure application deployment workflow.
 
+### 2026-07-23: Resource-group-scoped AVM-first Bicep
+**By:** bmoussaud (via Copilot)
+**What:** Every project-owned Bicep file must use `targetScope = 'resourceGroup'`. Deployments must use an exact-version Azure Verified Module first; native Bicep is allowed only when no suitable AVM preserves the required contract, and the fallback reason must be documented.
+**Why:** User directive establishing a consistent deployment boundary and requiring maintained verified modules before native resource declarations.
+
+### 2026-07-23: CLI applications load local dotenv configuration
+**By:** bmoussaud (via Copilot)
+**What:** Every CLI application loads `.env` with `python-dotenv` at its composition-root entry point before reading environment-backed settings. For azd-managed projects, local configuration is refreshed with `azd env get-values > .env`; the generated file is ignored and never logged or committed.
+**Why:** User directive establishing a consistent local configuration workflow for all project CLI applications.
+
 ### 2026-07-22T13:11:01+0000: Provider-neutral modular monolith for the first vertical slice
 **By:** Morpheus
 **What:** Start with one Python application organized around domain models and use-case services, with explicit ports for image generation, artifact storage, and job state. Keep model vendors and Azure services behind adapters. Use a validated card-generation request and a job-shaped result contract with stable identifiers, status, provenance, and artifact metadata. Begin with synchronous in-process orchestration while preserving interfaces that can move to a queue later.
@@ -66,6 +76,11 @@
 **By:** Morpheus, Tank, Neo
 **What:** The Bicep/azd target is prepared for subscription `external-bmoussaud-ms` in Sweden Central (`swedencentral`): resource group `rg-fantasy-cards-dev-8f327f8c`, Foundry account `fnd-fantasy-cards-dev-8f327f8c`, Foundry project `prj-fantasy-cards-dev-8f327f8c`, and model deployment `gpt-image-2-dev`. The validated model target is `gpt-image-2` version `2026-04-21` on `GlobalStandard`, proposed capacity 1. At validation time, live capacity was 1 and quota was limit 2/current usage 1. Azure provisioning is a billable gate and must not run until bmoussaud explicitly approves it. No Azure resources were created.
 **Why:** The design review established a coherent deployment lifecycle and an explicit approval boundary. Azure preflight and local validation passed, while Neo independently confirmed the exact regional model facts. Approval must also acknowledge cross-geography processing and default content and abuse monitoring before provisioning.
+
+### 2026-07-23T08:27:28+0000: Policy-compliant private Blob recovery supersedes public-endpoint repair (consolidated)
+**By:** Morpheus
+**What:** The initial proposal to restore authenticated public Blob reachability is superseded because management-group policy enforces Storage `publicNetworkAccess=Disabled`. Recovery therefore requires a parallel external workload-profiles Container Apps environment attached at creation to a delegated `/27` infrastructure subnet, a separate `/28` private-endpoint subnet, one Blob private endpoint, and `privatelink.blob.core.windows.net` private DNS with VNet link and zone group. Reuse the existing private Storage container, application UAMI, and exact RBAC scopes; retain public Container Apps ingress. Create `-private` environment/app resources, validate before cutover, retain the old environment for rollback, and decommission only with separate approval. The user selected hold state unchanged, so no private-network implementation or destructive cost stop is authorized. The repaired application revision may remain live in degraded mode, but generation is not accepted until private Blob connectivity passes.
+**Why:** Live ARM showed a non-VNet D4 Container Apps environment and no private route to policy-disabled Storage. Service endpoints cannot satisfy `publicNetworkAccess=Disabled`, and the current environment cannot gain VNet integration in place. Parallel replacement is the smallest policy-compliant recovery but temporarily doubles D4 cost and adds private endpoint/DNS cost, requiring explicit approval. Holding preserves the healthy application endpoint and security posture while leaving safe `503 artifact_unavailable` generation behavior and ongoing D4 charges explicit.
 
 ## Governance
 
