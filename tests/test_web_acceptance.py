@@ -80,7 +80,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertNotIn("AZURE_", ready.text)
         self.assertNotIn("FANTASY_CARD_", ready.text)
 
-    def test_json_generation_returns_exact_safe_dto_and_streamable_artifact(self) -> None:
+    def test_json_generation_returns_artifact_reference_and_valid_png(self) -> None:
         with patch.dict(os.environ, self.environment, clear=True):
             with self.create_client() as client:
                 response = client.post(
@@ -138,6 +138,8 @@ class WebAcceptanceTests(unittest.TestCase):
             int(artifact_response.headers["content-length"]),
             len(artifact_response.content),
         )
+        self.assertTrue(artifact_response.content.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertTrue(artifact_response.content.endswith(b"IEND\xaeB`\x82"))
         self.assertNotIn("file_path", response.text)
         self.assertNotIn("idempotency_key", response.text)
         self.assertNotIn("blob", response.text.lower())
@@ -288,6 +290,62 @@ class WebAcceptanceTests(unittest.TestCase):
                 self.assert_error_envelope(response, public_code)
                 self.assertNotIn(private_detail, response.text)
                 self.assertNotIn("invalid-private-value", response.text)
+
+    def test_blob_write_failure_returns_safe_artifact_unavailable_response(self) -> None:
+        from fantasy_cards.adapters import (
+            ArtifactStorageError,
+            BlobArtifactStore,
+            InMemoryJobRepository,
+            LocalPngImageGenerator,
+        )
+        from fantasy_cards.application import GenerationService
+        from fantasy_cards.config import WebApplication
+        from fastapi.testclient import TestClient
+
+        private_endpoint = "https://policy-private.blob.core.windows.net"
+        private_credential = "credential=private-secret"
+        private_exception = "ServiceRequestError: private route is unreachable"
+        private_detail = (
+            f"{private_endpoint}; {private_credential}; {private_exception}"
+        )
+        artifact_store = BlobArtifactStore(
+            "https://cards.blob.core.windows.net",
+            "generated-cards",
+        )
+        job_repository = InMemoryJobRepository()
+        application = WebApplication(
+            service=GenerationService(
+                image_generator=LocalPngImageGenerator(),
+                artifact_store=artifact_store,
+                job_repository=job_repository,
+            ),
+            artifact_reader=artifact_store,
+            job_repository=job_repository,
+        )
+
+        with patch.dict(os.environ, self.environment, clear=True), patch.object(
+            artifact_store,
+            "save",
+            side_effect=ArtifactStorageError("artifact_unavailable", private_detail),
+        ) as save:
+            from fantasy_cards.web import create_app
+
+            with TestClient(create_app(application=application)) as client:
+                response = client.post(
+                    "/api/generations",
+                    json={"title": "Ember Sentinel", "description": "A safe prompt"},
+                )
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assert_error_envelope(response, "artifact_unavailable")
+        self.assertEqual(
+            response.json()["error"]["message"],
+            "The requested card image is unavailable.",
+        )
+        self.assertNotIn(private_endpoint, response.text)
+        self.assertNotIn(private_credential, response.text)
+        self.assertNotIn(private_exception, response.text)
+        save.assert_called_once()
 
     def test_successful_generation_logs_safe_completion_metadata(self) -> None:
         correlation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

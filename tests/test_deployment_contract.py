@@ -1,7 +1,9 @@
 import ast
+import json
 from pathlib import Path
 import re
 import shlex
+import subprocess
 import unittest
 
 
@@ -16,6 +18,9 @@ EXPECTED_AVM_MODULES = (
     "container-registry/registry",
     "storage/storage-account",
     "app/container-app",
+    "network/virtual-network",
+    "network/private-endpoint",
+    "network/private-dns-zone",
 )
 
 
@@ -94,6 +99,23 @@ class DeploymentContractTests(unittest.TestCase):
         cls.azure_deployment_design = (
             REPOSITORY_ROOT / "docs/design/azure-deployment.md"
         ).read_text(encoding="utf-8")
+        cls.legacy_blob_role_migration = (
+            REPOSITORY_ROOT
+            / "infra/scripts/retire_legacy_storage_blob_role.py"
+        ).read_text(encoding="utf-8")
+        compiled_web = subprocess.run(
+            ["bicep", "build", str(INFRASTRUCTURE_ROOT / "web.bicep"), "--stdout"],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if compiled_web.returncode:
+            raise AssertionError(
+                "Bicep compilation failed:\n"
+                f"{compiled_web.stdout}\n{compiled_web.stderr}"
+            )
+        cls.compiled_web_template = json.loads(compiled_web.stdout)
 
     def test_project_owned_bicep_uses_resource_group_scoped_avms_or_documented_fallbacks(self) -> None:
         templates = {
@@ -163,6 +185,31 @@ class DeploymentContractTests(unittest.TestCase):
                 "docker": {"path": "./Dockerfile", "context": "."},
             },
         )
+
+    def test_azd_service_tag_targets_only_private_container_app(self) -> None:
+        container_app_modules = [
+            match.group(1)
+            for match in re.finditer(
+                r"(?m)^\s*module\s+(\w+)\s+"
+                r"'br/public:avm/res/app/container-app:\d+\.\d+\.\d+'",
+                self.web_bicep,
+            )
+        ]
+        self.assertEqual(container_app_modules, ["containerApp", "privateContainerApp"])
+
+        app_blocks = {
+            name: extract_bicep_block(self.web_bicep, "module", name)
+            for name in container_app_modules
+        }
+        azd_target_modules = [
+            name
+            for name, app in app_blocks.items()
+            if re.search(r"'azd-service-name'\s*:\s*'web'", app)
+        ]
+
+        self.assertEqual(azd_target_modules, ["privateContainerApp"])
+        self.assertIn("name: privateContainerAppName", app_blocks["privateContainerApp"])
+        self.assertRegex(app_blocks["containerApp"], r"(?m)^\s*tags:\s*tags\s*$")
 
     def test_container_runtime_is_non_root_and_uses_the_approved_entry_point(self) -> None:
         instructions: dict[str, list[str]] = {}
@@ -237,13 +284,14 @@ class DeploymentContractTests(unittest.TestCase):
             "defaultToOAuthAuthentication: true",
             "supportsHttpsTrafficOnly: true",
             "minimumTlsVersion: 'TLS1_2'",
-            "publicNetworkAccess: 'Enabled'",
+            "publicNetworkAccess: 'Disabled'",
         ):
             self.assertIn(contract, storage)
         self.assertIn("publicAccess: 'None'", storage)
         self.assertIn("daysAfterCreationGreaterThan: 30", storage)
         self.assertIn("blobTypes:", storage)
         self.assertIn("'blockBlob'", storage)
+        self.assertNotIn("roleAssignments:", storage)
         self.assertIn("userAssignedResourceIds:", app)
         self.assertIn("applicationIdentityResourceId", app)
         self.assertIn("scope: containerRegistry", acr_role)
@@ -257,6 +305,163 @@ class DeploymentContractTests(unittest.TestCase):
             "applicationIdentityPrincipalId", acr_role + blob_role + telemetry_role
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
+
+    def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
+        migration = self.legacy_blob_role_migration
+
+        self.assertNotIn("hooks", self.azure)
+        self.assertNotIn(
+            "retire_legacy_storage_blob_role.py",
+            (REPOSITORY_ROOT / "azure.yaml").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "output APPLICATION_IDENTITY_PRINCIPAL_ID string",
+            self.main_bicep,
+        )
+        self.assertIn("BLOB_DATA_CONTRIBUTOR_ROLE_ID", migration)
+        self.assertIn('"AZURE_STORAGE_ACCOUNT_URL"', migration)
+        self.assertIn('"APPLICATION_IDENTITY_PRINCIPAL_ID"', migration)
+        self.assertIn(
+            'f"{storage_account_id}/blobServices/default/containers/artifacts"',
+            migration,
+        )
+        self.assertIn('"--assignee"', migration)
+        self.assertNotIn('"--assignee-object-id"', migration)
+        self.assertIn("if len(container_assignment_ids) != 1:", migration)
+        self.assertIn("if len(legacy_assignment_ids) != 1:", migration)
+        self.assertIn(
+            'run_az("role", "assignment", "delete", "--ids", legacy_assignment_ids[0])',
+            migration,
+        )
+        self.assertIn(
+            "The legacy account-scoped Storage Blob Data Contributor assignment ",
+            migration,
+        )
+        self.assertIn(
+            "remains after retirement.",
+            migration,
+        )
+        self.assertIn(
+            "The required container-scoped Storage Blob Data Contributor assignment ",
+            migration,
+        )
+        self.assertIn(
+            "is no longer present after retirement.",
+            migration,
+        )
+        self.assertRegex(
+            migration,
+            r"ARM incremental mode cannot delete a resource\s+that was merely omitted",
+        )
+
+    def test_private_blob_connectivity_uses_a_parallel_vnet_environment_and_private_dns(self) -> None:
+        virtual_network = extract_bicep_block(
+            self.web_bicep, "module", "privateVirtualNetwork"
+        )
+        private_dns_zone = extract_bicep_block(
+            self.web_bicep, "module", "privateDnsZone"
+        )
+        private_endpoint = extract_bicep_block(
+            self.web_bicep, "module", "blobPrivateEndpoint"
+        )
+        private_environment = extract_bicep_block(
+            self.web_bicep, "resource", "privateContainerAppsEnvironment"
+        )
+        private_app = extract_bicep_block(
+            self.web_bicep, "module", "privateContainerApp"
+        )
+        existing_environment = extract_bicep_block(
+            self.web_bicep, "resource", "containerAppsEnvironment"
+        )
+        existing_app = extract_bicep_block(self.web_bicep, "module", "containerApp")
+
+        self.assertIn(
+            "br/public:avm/res/network/virtual-network:0.9.0", self.web_bicep
+        )
+        self.assertIn(
+            "br/public:avm/res/network/private-endpoint:0.9.1", self.web_bicep
+        )
+        self.assertIn(
+            "br/public:avm/res/network/private-dns-zone:0.8.1", self.web_bicep
+        )
+        for contract in (
+            "addressPrefix: '10.30.0.0/27'",
+            "delegation: 'Microsoft.App/environments'",
+            "addressPrefix: '10.30.0.32/28'",
+            "privateEndpointNetworkPolicies: 'Disabled'",
+        ):
+            self.assertIn(contract, virtual_network)
+        self.assertIn("infrastructureSubnetId:", private_environment)
+        self.assertIn("internal: false", private_environment)
+        self.assertIn("publicNetworkAccess: 'Enabled'", private_environment)
+        self.assertIn(
+            "environmentResourceId: privateContainerAppsEnvironment.id", private_app
+        )
+        self.assertIn("ingressExternal: true", private_app)
+        self.assertIn("privateLinkServiceId: storageAccountResource.id", private_endpoint)
+        self.assertIn("'blob'", private_endpoint)
+        self.assertIn("privateDnsZone.outputs.resourceId", private_endpoint)
+        self.assertIn(
+            "privatelink.blob.${environment().suffixes.storage}", self.web_bicep
+        )
+        self.assertIn("virtualNetworkResourceId: privateVirtualNetwork.outputs.resourceId", private_dns_zone)
+        self.assertNotIn("vnetConfiguration:", existing_environment)
+        self.assertIn("environmentResourceId: containerAppsEnvironment.id", existing_app)
+
+    def test_private_container_app_name_uses_an_aca_safe_resource_token(self) -> None:
+        private_app = extract_bicep_block(
+            self.web_bicep, "module", "privateContainerApp"
+        )
+        expected_name = "ca-fc-nrp2z4rl3jd32-pvt"
+
+        self.assertIn(
+            "var privateContainerAppName = 'ca-fc-${resourceToken}-pvt'",
+            self.web_bicep,
+        )
+        self.assertIn("name: privateContainerAppName", private_app)
+        self.assertEqual(len(expected_name), 23)
+        self.assertLessEqual(len(expected_name), 32)
+        self.assertRegex(expected_name, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+        self.assertNotIn("--", expected_name)
+
+    def test_compiled_private_blob_and_rbac_resources_wait_for_avm_deployments(self) -> None:
+        resources = self.compiled_web_template["resources"]
+
+        def dependency_text(resource: dict[str, object]) -> str:
+            return "\n".join(resource.get("dependsOn", []))
+
+        blob_private_endpoint = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Resources/deployments"
+            and "blob-private-endpoint" in resource["name"]
+        )
+        acr_pull_assignment = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Authorization/roleAssignments"
+            and "acrPullRoleDefinitionId" in resource["properties"]["roleDefinitionId"]
+        )
+        blob_data_assignment = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Authorization/roleAssignments"
+            and "blobDataContributorRoleDefinitionId"
+            in resource["properties"]["roleDefinitionId"]
+        )
+
+        self.assertIn(
+            "format('storage-account-{0}', variables('resourceToken'))",
+            dependency_text(blob_private_endpoint),
+        )
+        self.assertIn(
+            "format('container-registry-{0}', variables('resourceToken'))",
+            dependency_text(acr_pull_assignment),
+        )
+        self.assertIn(
+            "format('storage-account-{0}', variables('resourceToken'))",
+            dependency_text(blob_data_assignment),
+        )
 
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")
@@ -299,7 +504,9 @@ class DeploymentContractTests(unittest.TestCase):
     def test_diagnostics_budget_and_alerts_match_emitted_telemetry_contract(self) -> None:
         for resource in (
             "environmentDiagnostics",
+            "privateEnvironmentDiagnostics",
             "appDiagnostics",
+            "privateAppDiagnostics",
             "registryDiagnostics",
             "actionGroup",
             "resourceGroupBudget",
