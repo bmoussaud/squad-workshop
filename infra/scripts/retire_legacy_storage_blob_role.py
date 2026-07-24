@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from urllib.parse import urlparse
@@ -25,12 +26,25 @@ def required_environment(name: str) -> str:
 
 
 def run_az(*arguments: str) -> str:
-    completed = subprocess.run(
-        ("az", *arguments),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    executable = shutil.which("az") or shutil.which("az.cmd")
+    if executable is None:
+        raise RuntimeError(
+            "Azure CLI executable was not found. This azd postprovision hook requires "
+            "Azure CLI to verify and retire the legacy Blob RBAC assignment. Install "
+            "Azure CLI and rerun azd up."
+        )
+    try:
+        completed = subprocess.run(
+            [executable, *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise RuntimeError(
+            "Unable to execute Azure CLI for postprovision Blob RBAC retirement. "
+            "Verify the Azure CLI installation and rerun azd up."
+        ) from error
     return completed.stdout
 
 
