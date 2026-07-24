@@ -97,6 +97,10 @@ class DeploymentContractTests(unittest.TestCase):
         cls.azure_deployment_design = (
             REPOSITORY_ROOT / "docs/design/azure-deployment.md"
         ).read_text(encoding="utf-8")
+        cls.legacy_blob_role_migration = (
+            REPOSITORY_ROOT
+            / "infra/scripts/retire_legacy_storage_blob_role.py"
+        ).read_text(encoding="utf-8")
 
     def test_project_owned_bicep_uses_resource_group_scoped_avms_or_documented_fallbacks(self) -> None:
         templates = {
@@ -247,6 +251,7 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("daysAfterCreationGreaterThan: 30", storage)
         self.assertIn("blobTypes:", storage)
         self.assertIn("'blockBlob'", storage)
+        self.assertNotIn("roleAssignments:", storage)
         self.assertIn("userAssignedResourceIds:", app)
         self.assertIn("applicationIdentityResourceId", app)
         self.assertIn("scope: containerRegistry", acr_role)
@@ -260,6 +265,53 @@ class DeploymentContractTests(unittest.TestCase):
             "applicationIdentityPrincipalId", acr_role + blob_role + telemetry_role
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
+
+    def test_postprovision_retires_only_the_legacy_account_scoped_blob_role(self) -> None:
+        migration = self.legacy_blob_role_migration
+
+        self.assertIn("postprovision", self.azure["hooks"])
+        self.assertEqual(
+            self.azure["hooks"]["postprovision"]["run"],
+            "python infra/scripts/retire_legacy_storage_blob_role.py",
+        )
+        self.assertIn(
+            "output APPLICATION_IDENTITY_PRINCIPAL_ID string",
+            self.main_bicep,
+        )
+        self.assertIn("BLOB_DATA_CONTRIBUTOR_ROLE_ID", migration)
+        self.assertIn('"AZURE_STORAGE_ACCOUNT_URL"', migration)
+        self.assertIn('"APPLICATION_IDENTITY_PRINCIPAL_ID"', migration)
+        self.assertIn(
+            'f"{storage_account_id}/blobServices/default/containers/artifacts"',
+            migration,
+        )
+        self.assertIn('"--assignee-object-id"', migration)
+        self.assertIn("if len(container_assignment_ids) != 1:", migration)
+        self.assertIn("if len(legacy_assignment_ids) > 1:", migration)
+        self.assertIn(
+            'run_az("role", "assignment", "delete", "--ids", legacy_assignment_ids[0])',
+            migration,
+        )
+        self.assertIn(
+            "The legacy account-scoped Storage Blob Data Contributor assignment ",
+            migration,
+        )
+        self.assertIn(
+            "remains after retirement.",
+            migration,
+        )
+        self.assertIn(
+            "The required container-scoped Storage Blob Data Contributor assignment ",
+            migration,
+        )
+        self.assertIn(
+            "is no longer present after retirement.",
+            migration,
+        )
+        self.assertRegex(
+            migration,
+            r"ARM incremental mode cannot delete a resource\s+that was merely omitted",
+        )
 
     def test_private_blob_connectivity_uses_a_parallel_vnet_environment_and_private_dns(self) -> None:
         virtual_network = extract_bicep_block(

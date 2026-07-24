@@ -81,6 +81,7 @@ var tags = {
 }
 
 module foundry 'foundry.bicep' = {
+  name: 'foundry-${environmentName}'
   params: {
     location: location
     tags: tags
@@ -99,6 +100,7 @@ module foundry 'foundry.bicep' = {
 }
 
 module web 'web.bicep' = {
+  name: 'web-${environmentName}'
   params: {
     location: applicationLocation
     tags: tags
@@ -138,3 +140,4 @@ output AZURE_CONTAINER_APPS_ENVIRONMENT_NAME string = web.outputs.containerAppsE
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = web.outputs.containerRegistryEndpoint
 output AZURE_STORAGE_ACCOUNT_URL string = web.outputs.storageAccountUrl
 output FANTASY_CARD_BLOB_CONTAINER string = web.outputs.blobContainerName
+output APPLICATION_IDENTITY_PRINCIPAL_ID string = foundry.outputs.applicationIdentityPrincipalId

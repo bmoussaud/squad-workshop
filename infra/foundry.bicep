@@ -15,6 +15,7 @@ param modelSkuName string
 param modelCapacity int
 
 module platformIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.6.0' = {
+  name: 'platform-identity-${platformIdentityName}'
   params: {
     name: platformIdentityName
     location: location
@@ -23,6 +24,7 @@ module platformIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
 }
 
 module applicationIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.6.0' = {
+  name: 'application-identity-${applicationIdentityName}'
   params: {
     name: applicationIdentityName
     location: location
@@ -31,6 +33,7 @@ module applicationIdentity 'br/public:avm/res/managed-identity/user-assigned-ide
 }
 
 module logAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspace:0.16.0' = {
+  name: 'log-analytics-${logAnalyticsWorkspaceName}'
   params: {
     name: logAnalyticsWorkspaceName
     location: location
@@ -45,6 +48,7 @@ module logAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspace:0
 }
 
 module applicationInsights 'br/public:avm/res/insights/component:0.8.0' = {
+  name: 'application-insights-${applicationInsightsName}'
   params: {
     name: applicationInsightsName
     workspaceResourceId: logAnalyticsWorkspace.outputs.resourceId
@@ -60,6 +64,7 @@ module applicationInsights 'br/public:avm/res/insights/component:0.8.0' = {
 }
 
 module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = {
+  name: 'foundry-account-${foundryAccountName}'
   params: {
     name: foundryAccountName
     kind: 'AIServices'
