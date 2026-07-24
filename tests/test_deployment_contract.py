@@ -16,6 +16,9 @@ EXPECTED_AVM_MODULES = (
     "container-registry/registry",
     "storage/storage-account",
     "app/container-app",
+    "network/virtual-network",
+    "network/private-endpoint",
+    "network/private-dns-zone",
 )
 
 
@@ -237,7 +240,7 @@ class DeploymentContractTests(unittest.TestCase):
             "defaultToOAuthAuthentication: true",
             "supportsHttpsTrafficOnly: true",
             "minimumTlsVersion: 'TLS1_2'",
-            "publicNetworkAccess: 'Enabled'",
+            "publicNetworkAccess: 'Disabled'",
         ):
             self.assertIn(contract, storage)
         self.assertIn("publicAccess: 'None'", storage)
@@ -257,6 +260,60 @@ class DeploymentContractTests(unittest.TestCase):
             "applicationIdentityPrincipalId", acr_role + blob_role + telemetry_role
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
+
+    def test_private_blob_connectivity_uses_a_parallel_vnet_environment_and_private_dns(self) -> None:
+        virtual_network = extract_bicep_block(
+            self.web_bicep, "module", "privateVirtualNetwork"
+        )
+        private_dns_zone = extract_bicep_block(
+            self.web_bicep, "module", "privateDnsZone"
+        )
+        private_endpoint = extract_bicep_block(
+            self.web_bicep, "module", "blobPrivateEndpoint"
+        )
+        private_environment = extract_bicep_block(
+            self.web_bicep, "resource", "privateContainerAppsEnvironment"
+        )
+        private_app = extract_bicep_block(
+            self.web_bicep, "module", "privateContainerApp"
+        )
+        existing_environment = extract_bicep_block(
+            self.web_bicep, "resource", "containerAppsEnvironment"
+        )
+        existing_app = extract_bicep_block(self.web_bicep, "module", "containerApp")
+
+        self.assertIn(
+            "br/public:avm/res/network/virtual-network:0.9.0", self.web_bicep
+        )
+        self.assertIn(
+            "br/public:avm/res/network/private-endpoint:0.9.1", self.web_bicep
+        )
+        self.assertIn(
+            "br/public:avm/res/network/private-dns-zone:0.8.1", self.web_bicep
+        )
+        for contract in (
+            "addressPrefix: '10.30.0.0/27'",
+            "delegation: 'Microsoft.App/environments'",
+            "addressPrefix: '10.30.0.32/28'",
+            "privateEndpointNetworkPolicies: 'Disabled'",
+        ):
+            self.assertIn(contract, virtual_network)
+        self.assertIn("infrastructureSubnetId:", private_environment)
+        self.assertIn("internal: false", private_environment)
+        self.assertIn("publicNetworkAccess: 'Enabled'", private_environment)
+        self.assertIn(
+            "environmentResourceId: privateContainerAppsEnvironment.id", private_app
+        )
+        self.assertIn("ingressExternal: true", private_app)
+        self.assertIn("privateLinkServiceId: storageAccountResource.id", private_endpoint)
+        self.assertIn("'blob'", private_endpoint)
+        self.assertIn("privateDnsZone.outputs.resourceId", private_endpoint)
+        self.assertIn(
+            "privatelink.blob.${environment().suffixes.storage}", self.web_bicep
+        )
+        self.assertIn("virtualNetworkResourceId: privateVirtualNetwork.outputs.resourceId", private_dns_zone)
+        self.assertNotIn("vnetConfiguration:", existing_environment)
+        self.assertIn("environmentResourceId: containerAppsEnvironment.id", existing_app)
 
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")
@@ -299,7 +356,9 @@ class DeploymentContractTests(unittest.TestCase):
     def test_diagnostics_budget_and_alerts_match_emitted_telemetry_contract(self) -> None:
         for resource in (
             "environmentDiagnostics",
+            "privateEnvironmentDiagnostics",
             "appDiagnostics",
+            "privateAppDiagnostics",
             "registryDiagnostics",
             "actionGroup",
             "resourceGroupBudget",

@@ -29,12 +29,22 @@ var containerRegistryName = 'acrfantasycards${resourceToken}'
 var storageAccountName = 'stfc${resourceToken}'
 var blobContainerName = 'artifacts'
 var monitoringMetricsPublisherRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
+var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var blobDataContributorRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+var privateContainerAppName = '${containerAppName}-private'
+var privateContainerAppsEnvironmentName = '${containerAppsEnvironmentName}-private'
+var privateVirtualNetworkName = 'vnet-fantasy-cards-${environmentName}-private'
+var privateInfrastructureSubnetName = 'snet-container-apps-infrastructure'
+var privateEndpointSubnetName = 'snet-private-endpoints'
+var privateEndpointName = 'pe-${storageAccountName}-blob'
+var privateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
 	name: last(split(applicationInsightsResourceId, '/'))
 }
 
 module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' = {
+	name: 'container-registry-${resourceToken}'
 	params: {
 		name: containerRegistryName
 		location: location
@@ -50,17 +60,11 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' =
 		retentionPolicyDays: 7
 		trustPolicyStatus: 'disabled'
 		enableTelemetry: false
-		roleAssignments: [
-			{
-				principalId: applicationIdentityPrincipalId
-				roleDefinitionIdOrName: 'AcrPull'
-				description: 'Allow the fantasy cards application identity to pull container images from the registry.'
-			}
-		]
 	}
 }
 
 module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
+	name: 'storage-account-${resourceToken}'
 	params: {
 		name: storageAccountName
 		location: location
@@ -73,7 +77,7 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
 		defaultToOAuthAuthentication: true
 		dnsEndpointType: 'Standard'
 		minimumTlsVersion: 'TLS1_2'
-		publicNetworkAccess: 'Enabled'
+		publicNetworkAccess: 'Disabled'
 		supportsHttpsTrafficOnly: true
 		managementPolicyRules: [
 			{
@@ -98,17 +102,6 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
 					}
 				}
 			}
-		]
-		roleAssignments: [
-			{
-				principalId: applicationIdentityPrincipalId
-				roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-			}
-			 {
-        principalId: deployer().objectId
-        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-        principalType: 'User'
-      }
 		]
 		blobServices: {
 			containerDeleteRetentionPolicyEnabled: true
@@ -162,6 +155,105 @@ resource artifactContainer 'Microsoft.Storage/storageAccounts/blobServices/conta
 	name: blobContainerName
 }
 
+module privateVirtualNetwork 'br/public:avm/res/network/virtual-network:0.9.0' = {
+	name: 'private-virtual-network-${resourceToken}'
+	params: {
+		name: privateVirtualNetworkName
+		location: location
+		tags: tags
+		addressPrefixes: [
+			'10.30.0.0/26'
+		]
+		subnets: [
+			{
+				name: privateInfrastructureSubnetName
+				addressPrefix: '10.30.0.0/27'
+				delegation: 'Microsoft.App/environments'
+			}
+			{
+				name: privateEndpointSubnetName
+				addressPrefix: '10.30.0.32/28'
+				privateEndpointNetworkPolicies: 'Disabled'
+			}
+		]
+		enableTelemetry: false
+	}
+}
+
+module privateDnsZone 'br/public:avm/res/network/private-dns-zone:0.8.1' = {
+	name: 'private-dns-zone-${resourceToken}'
+	params: {
+		name: privateDnsZoneName
+		location: 'global'
+		tags: tags
+		virtualNetworkLinks: [
+			{
+				name: '${privateVirtualNetworkName}-link'
+				virtualNetworkResourceId: privateVirtualNetwork.outputs.resourceId
+				registrationEnabled: false
+			}
+		]
+		enableTelemetry: false
+	}
+}
+
+module blobPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.9.1' = {
+	name: 'blob-private-endpoint-${resourceToken}'
+	params: {
+		name: privateEndpointName
+		location: location
+		tags: tags
+		subnetResourceId: privateVirtualNetwork.outputs.subnetResourceIds[1]
+		privateLinkServiceConnections: [
+			{
+				name: 'blob'
+				properties: {
+					privateLinkServiceId: storageAccountResource.id
+					groupIds: [
+						'blob'
+					]
+				}
+			}
+		]
+		privateDnsZoneGroup: {
+			name: 'blob'
+			privateDnsZoneGroupConfigs: [
+				{
+					name: 'privatelink-blob-core-windows-net'
+					privateDnsZoneResourceId: privateDnsZone.outputs.resourceId
+				}
+			]
+		}
+		enableTelemetry: false
+	}
+}
+
+// native-bicep-fallback: The maintained managed-environment AVM requires a Log Analytics shared key for app logs, which violates the approved secretless telemetry contract.
+resource privateContainerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
+	name: privateContainerAppsEnvironmentName
+	location: location
+	tags: tags
+	properties: {
+		appLogsConfiguration: {
+			destination: 'azure-monitor'
+		}
+		publicNetworkAccess: 'Enabled'
+		vnetConfiguration: {
+			infrastructureSubnetId: privateVirtualNetwork.outputs.subnetResourceIds[0]
+			internal: false
+		}
+		workloadProfiles: [
+			{
+				name: 'dedicated'
+				workloadProfileType: workloadProfileType
+				minimumCount: workloadProfileMinimumCount
+				maximumCount: workloadProfileMaximumCount
+			}
+		]
+		zoneRedundant: false
+	}
+}
+
 // native-bicep-fallback: The maintained managed-environment AVM requires a Log Analytics shared key for app logs, which violates the approved secretless telemetry contract.
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
 	name: containerAppsEnvironmentName
@@ -185,6 +277,7 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-
 }
 
 module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
+	name: 'container-app-${resourceToken}'
 	params: {
 		name: containerAppName
 		location: location
@@ -315,8 +408,167 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 	
 }
 
+module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
+	name: 'private-container-app-${resourceToken}'
+	params: {
+		name: privateContainerAppName
+		location: location
+		tags: union(tags, {
+			'azd-service-name': 'web'
+		})
+		managedIdentities: {
+			userAssignedResourceIds: [
+				applicationIdentityResourceId
+			]
+		}
+		environmentResourceId: privateContainerAppsEnvironment.id
+		workloadProfileName: 'dedicated'
+		activeRevisionsMode: 'Single'
+		ingressAllowInsecure: false
+		ingressExternal: true
+		ingressTargetPort: 8000
+		ingressTransport: 'auto'
+		registries: [
+			{
+				identity: applicationIdentityResourceId
+				server: containerRegistry.outputs.loginServer
+			}
+		]
+		containers: [
+			{
+				name: 'web'
+				image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+				env: [
+					{
+						name: 'FANTASY_CARD_IMAGE_GENERATOR'
+						value: 'foundry'
+					}
+					{
+						name: 'AZURE_OPENAI_ENDPOINT'
+						value: openAiEndpoint
+					}
+					{
+						name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
+						value: modelDeploymentName
+					}
+					{
+						name: 'AZURE_CLIENT_ID'
+						value: applicationIdentityClientId
+					}
+					{
+						name: 'FANTASY_CARD_IMAGE_TIMEOUT_SECONDS'
+						value: '120'
+					}
+					{
+						name: 'FANTASY_CARD_ARTIFACT_STORE'
+						value: 'blob'
+					}
+					{
+						name: 'AZURE_STORAGE_ACCOUNT_URL'
+						value: storageAccount.outputs.primaryBlobEndpoint
+					}
+					{
+						name: 'FANTASY_CARD_BLOB_CONTAINER'
+						value: blobContainerName
+					}
+					{
+						name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+						value: applicationInsightsConnectionString
+					}
+					{
+						name: 'PORT'
+						value: '8000'
+					}
+					{
+						name: 'FANTASY_CARD_MAX_GENERATION_CONCURRENCY'
+						value: '1'
+					}
+					{
+						name: 'FANTASY_CARD_RATE_LIMIT_ATTEMPTS'
+						value: '10'
+					}
+					{
+						name: 'FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS'
+						value: '600'
+					}
+				]
+				resources: {
+					cpu: json(containerCpu)
+					memory: containerMemory
+				}
+				probes: [
+					{
+						type: 'Liveness'
+						httpGet: {
+							path: '/health/live'
+							port: 8000
+							scheme: 'HTTP'
+						}
+						initialDelaySeconds: 10
+						periodSeconds: 30
+						timeoutSeconds: 5
+						failureThreshold: 3
+					}
+					{
+						type: 'Readiness'
+						httpGet: {
+							path: '/health/ready'
+							port: 8000
+							scheme: 'HTTP'
+						}
+						initialDelaySeconds: 5
+						periodSeconds: 10
+						timeoutSeconds: 5
+						failureThreshold: 3
+					}
+				]
+			}
+		]
+		scaleMinReplicas: 1
+		scaleMaxReplicas: 2
+		scaleRules: [
+			{
+				name: 'http-concurrency'
+				http: {
+					metadata: {
+						concurrentRequests: '1'
+					}
+				}
+			}
+		]
+	}
+}
+
 resource containerAppResource 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
 	name: containerAppName
+}
+
+resource privateContainerAppResource 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
+	name: privateContainerAppName
+}
+
+// native-bicep-fallback: The registry AVM supports registry-scoped assignments, but this explicit assignment preserves the existing deterministic name and role-definition-ID contract.
+resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+	scope: containerRegistryResource
+	name: guid(containerRegistryResource.id, applicationIdentityPrincipalId, acrPullRoleDefinitionId)
+	properties: {
+		principalId: applicationIdentityPrincipalId
+		principalType: 'ServicePrincipal'
+		roleDefinitionId: acrPullRoleDefinitionId
+		description: 'Allow the fantasy cards application identity to pull container images from the registry.'
+	}
+}
+
+// native-bicep-fallback: The Storage AVM does not expose the required artifact-container scope for this least-privilege assignment.
+resource blobDataAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+	scope: artifactContainer
+	name: guid(artifactContainer.id, applicationIdentityPrincipalId, blobDataContributorRoleDefinitionId)
+	properties: {
+		principalId: applicationIdentityPrincipalId
+		principalType: 'ServicePrincipal'
+		roleDefinitionId: blobDataContributorRoleDefinitionId
+		description: 'Allow the fantasy cards application identity to read and write private artifacts.'
+	}
 }
 
 
@@ -355,10 +607,54 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 	}
 }
 
+// native-bicep-fallback: The selected managed-environment AVM is unsuitable because it requires a shared key; this diagnostic setting remains tied to the native private-environment fallback.
+resource privateEnvironmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+	scope: privateContainerAppsEnvironment
+	name: 'send-to-log-analytics'
+	dependsOn: [
+		privateContainerApp
+	]
+	properties: {
+		workspaceId: logAnalyticsWorkspaceResourceId
+		logAnalyticsDestinationType: 'Dedicated'
+		logs: [
+			{
+				categoryGroup: 'allLogs'
+				enabled: true
+			}
+		]
+		metrics: [
+			{
+				category: 'AllMetrics'
+				enabled: true
+			}
+		]
+	}
+}
+
 // native-bicep-fallback: The Container App AVM does not expose the required app diagnostic-setting configuration.
 resource appDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
 	scope: containerAppResource
 	name: 'send-to-log-analytics'
+	properties: {
+		workspaceId: logAnalyticsWorkspaceResourceId
+		logAnalyticsDestinationType: 'Dedicated'
+		metrics: [
+			{
+				category: 'AllMetrics'
+				enabled: true
+			}
+		]
+	}
+}
+
+// native-bicep-fallback: The Container App AVM does not expose the required app diagnostic-setting configuration.
+resource privateAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+	scope: privateContainerAppResource
+	name: 'send-to-log-analytics'
+	dependsOn: [
+		privateContainerApp
+	]
 	properties: {
 		workspaceId: logAnalyticsWorkspaceResourceId
 		logAnalyticsDestinationType: 'Dedicated'
@@ -661,9 +957,9 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 	}
 }
 
-output serviceUri string = 'https://${containerApp.outputs.fqdn}'
-output containerAppName string = containerApp.outputs.name
-output containerAppsEnvironmentName string = containerAppsEnvironment.name
+output serviceUri string = 'https://${privateContainerApp.outputs.fqdn}'
+output containerAppName string = privateContainerApp.outputs.name
+output containerAppsEnvironmentName string = privateContainerAppsEnvironment.name
 output containerRegistryEndpoint string = containerRegistry.outputs.loginServer
 output storageAccountUrl string = storageAccount.outputs.primaryBlobEndpoint
 output blobContainerName string = artifactContainer.name
