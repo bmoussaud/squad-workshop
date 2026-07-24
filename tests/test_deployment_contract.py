@@ -382,6 +382,22 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertNotIn("vnetConfiguration:", existing_environment)
         self.assertIn("environmentResourceId: containerAppsEnvironment.id", existing_app)
 
+    def test_private_container_app_name_uses_an_aca_safe_resource_token(self) -> None:
+        private_app = extract_bicep_block(
+            self.web_bicep, "module", "privateContainerApp"
+        )
+        expected_name = "ca-fc-nrp2z4rl3jd32-pvt"
+
+        self.assertIn(
+            "var privateContainerAppName = 'ca-fc-${resourceToken}-pvt'",
+            self.web_bicep,
+        )
+        self.assertIn("name: privateContainerAppName", private_app)
+        self.assertEqual(len(expected_name), 23)
+        self.assertLessEqual(len(expected_name), 32)
+        self.assertRegex(expected_name, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+        self.assertNotIn("--", expected_name)
+
     def test_compiled_private_blob_and_rbac_resources_wait_for_avm_deployments(self) -> None:
         resources = self.compiled_web_template["resources"]
 
