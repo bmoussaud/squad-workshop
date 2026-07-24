@@ -186,6 +186,31 @@ class DeploymentContractTests(unittest.TestCase):
             },
         )
 
+    def test_azd_service_tag_targets_only_private_container_app(self) -> None:
+        container_app_modules = [
+            match.group(1)
+            for match in re.finditer(
+                r"(?m)^\s*module\s+(\w+)\s+"
+                r"'br/public:avm/res/app/container-app:\d+\.\d+\.\d+'",
+                self.web_bicep,
+            )
+        ]
+        self.assertEqual(container_app_modules, ["containerApp", "privateContainerApp"])
+
+        app_blocks = {
+            name: extract_bicep_block(self.web_bicep, "module", name)
+            for name in container_app_modules
+        }
+        azd_target_modules = [
+            name
+            for name, app in app_blocks.items()
+            if re.search(r"'azd-service-name'\s*:\s*'web'", app)
+        ]
+
+        self.assertEqual(azd_target_modules, ["privateContainerApp"])
+        self.assertIn("name: privateContainerAppName", app_blocks["privateContainerApp"])
+        self.assertRegex(app_blocks["containerApp"], r"(?m)^\s*tags:\s*tags\s*$")
+
     def test_container_runtime_is_non_root_and_uses_the_approved_entry_point(self) -> None:
         instructions: dict[str, list[str]] = {}
         for line in self.dockerfile.splitlines():

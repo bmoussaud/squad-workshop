@@ -284,9 +284,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 	params: {
 		name: containerAppName
 		location: location
-		tags: union(tags, {
-			'azd-service-name': 'web'
-		})
+		tags: tags
 		managedIdentities: {
 			userAssignedResourceIds: [
 				applicationIdentityResourceId
