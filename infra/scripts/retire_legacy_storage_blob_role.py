@@ -1,14 +1,16 @@
 """Retire the pre-container-scope Storage Blob Data Contributor assignment.
 
-This azd postprovision migration runs only after Bicep has created the
-container-scoped assignment. ARM incremental mode cannot delete a resource
-that was merely omitted from a later template.
+Run this explicitly as an after-deployment maintenance action after Bicep has
+created the container-scoped assignment.
+ARM incremental mode cannot delete a resource that was merely omitted from a
+later template.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,22 +18,58 @@ from urllib.parse import urlparse
 
 
 BLOB_DATA_CONTRIBUTOR_ROLE_ID = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+MAX_CLI_DIAGNOSTIC_LENGTH = 4_096
+SENSITIVE_CLI_VALUE = re.compile(
+    r"""(?ix)
+    (?P<prefix>
+        ["']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|
+        authorization|client[_-]?secret|secret|password|connection[_-]?string|
+        sig)["']?\s*[:=]\s*
+    )
+    (?P<value>"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;]+)
+    """
+)
+BEARER_TOKEN = re.compile(r"(?i)\bbearer\s+[a-z0-9\-._~+/=]+")
 
 
 def required_environment(name: str) -> str:
     value = os.environ.get(name)
     if not value:
-        raise RuntimeError(f"{name} must be set by the successful Bicep provision.")
+        raise RuntimeError(f"{name} must be set from the successful Bicep provision.")
     return value
+
+
+def safe_cli_diagnostic(value: str | bytes | None) -> str:
+    if not value:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode(errors="replace")
+    redacted = SENSITIVE_CLI_VALUE.sub(r"\g<prefix>[REDACTED]", value)
+    redacted = BEARER_TOKEN.sub("Bearer [REDACTED]", redacted)
+    redacted = redacted.strip()
+    if len(redacted) > MAX_CLI_DIAGNOSTIC_LENGTH:
+        return f"{redacted[:MAX_CLI_DIAGNOSTIC_LENGTH]}… [truncated]"
+    return redacted
+
+
+def azure_cli_failure_details(error: subprocess.CalledProcessError) -> str:
+    stderr = safe_cli_diagnostic(error.stderr)
+    stdout = safe_cli_diagnostic(error.stdout or error.output)
+    details = []
+    if stderr:
+        details.append(f"stderr: {stderr}")
+    if stdout:
+        details.append(f"stdout: {stdout}")
+    return "; ".join(details) if details else "no diagnostic output was returned"
 
 
 def run_az(*arguments: str) -> str:
     executable = shutil.which("az") or shutil.which("az.cmd")
     if executable is None:
         raise RuntimeError(
-            "Azure CLI executable was not found. This azd postprovision hook requires "
+            "Azure CLI executable was not found. This maintenance action requires "
             "Azure CLI to verify and retire the legacy Blob RBAC assignment. Install "
-            "Azure CLI and rerun azd up."
+            "Azure CLI, authenticate an authorized operator, and retry the script."
         )
     try:
         completed = subprocess.run(
@@ -40,10 +78,15 @@ def run_az(*arguments: str) -> str:
             capture_output=True,
             text=True,
         )
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            "Azure CLI failed during legacy Blob RBAC retirement "
+            f"(exit {error.returncode}): {azure_cli_failure_details(error)}"
+        ) from error
     except OSError as error:
         raise RuntimeError(
-            "Unable to execute Azure CLI for postprovision Blob RBAC retirement. "
-            "Verify the Azure CLI installation and rerun azd up."
+            "Unable to execute Azure CLI for legacy Blob RBAC retirement. "
+            "Verify the Azure CLI installation and retry the maintenance script."
         ) from error
     return completed.stdout
 
@@ -55,7 +98,7 @@ def role_assignment_ids(scope: str, principal_id: str) -> list[str]:
         "list",
         "--scope",
         scope,
-        "--assignee-object-id",
+        "--assignee",
         principal_id,
         "--role",
         BLOB_DATA_CONTRIBUTOR_ROLE_ID,
@@ -115,13 +158,12 @@ def main() -> int:
     legacy_assignment_ids = role_assignment_ids(
         storage_account_id, application_principal_id
     )
-    if len(legacy_assignment_ids) > 1:
+    if len(legacy_assignment_ids) != 1:
         raise RuntimeError(
-            "Refusing to retire account-scoped assignments: more than one direct "
-            "Storage Blob Data Contributor assignment matched the application identity."
+            "Refusing to retire account-scoped assignments: expected exactly one direct "
+            "Storage Blob Data Contributor assignment for the application identity."
         )
-    if legacy_assignment_ids:
-        run_az("role", "assignment", "delete", "--ids", legacy_assignment_ids[0])
+    run_az("role", "assignment", "delete", "--ids", legacy_assignment_ids[0])
 
     if role_assignment_ids(storage_account_id, application_principal_id):
         raise RuntimeError(

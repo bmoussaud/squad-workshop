@@ -281,13 +281,13 @@ class DeploymentContractTests(unittest.TestCase):
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
 
-    def test_postprovision_retires_only_the_legacy_account_scoped_blob_role(self) -> None:
+    def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
         migration = self.legacy_blob_role_migration
 
-        self.assertIn("postprovision", self.azure["hooks"])
-        self.assertEqual(
-            self.azure["hooks"]["postprovision"]["run"],
-            "python infra/scripts/retire_legacy_storage_blob_role.py",
+        self.assertNotIn("hooks", self.azure)
+        self.assertNotIn(
+            "retire_legacy_storage_blob_role.py",
+            (REPOSITORY_ROOT / "azure.yaml").read_text(encoding="utf-8"),
         )
         self.assertIn(
             "output APPLICATION_IDENTITY_PRINCIPAL_ID string",
@@ -300,9 +300,10 @@ class DeploymentContractTests(unittest.TestCase):
             'f"{storage_account_id}/blobServices/default/containers/artifacts"',
             migration,
         )
-        self.assertIn('"--assignee-object-id"', migration)
+        self.assertIn('"--assignee"', migration)
+        self.assertNotIn('"--assignee-object-id"', migration)
         self.assertIn("if len(container_assignment_ids) != 1:", migration)
-        self.assertIn("if len(legacy_assignment_ids) > 1:", migration)
+        self.assertIn("if len(legacy_assignment_ids) != 1:", migration)
         self.assertIn(
             'run_az("role", "assignment", "delete", "--ids", legacy_assignment_ids[0])',
             migration,

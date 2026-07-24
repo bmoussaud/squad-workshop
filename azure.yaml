@@ -10,6 +10,3 @@ services:
     docker:
       path: ./Dockerfile
       context: .
-hooks:
-  postprovision:
-    run: python infra/scripts/retire_legacy_storage_blob_role.py

@@ -73,3 +73,60 @@ class RunAzureCliTests(unittest.TestCase):
 
         self.assertEqual(which.call_args_list, [call("az"), call("az.cmd")])
         run.assert_not_called()
+
+    @patch.object(migration.subprocess, "run")
+    @patch.object(migration.shutil, "which", return_value="/usr/local/bin/az")
+    def test_includes_redacted_azure_cli_failure_diagnostics(
+        self, which: Mock, run: Mock
+    ) -> None:
+        run.side_effect = migration.subprocess.CalledProcessError(
+            2,
+            ["az", "role", "assignment", "list"],
+            output='{"access_token":"should-not-appear"}',
+            stderr=(
+                "ERROR: unrecognized arguments: --assignee-object-id "
+                "Authorization: should-not-appear"
+            ),
+        )
+
+        with self.assertRaises(RuntimeError) as raised:
+            migration.run_az("role", "assignment", "list")
+
+        message = str(raised.exception)
+        self.assertIn("exit 2", message)
+        self.assertIn(
+            "stderr: ERROR: unrecognized arguments: --assignee-object-id",
+            message,
+        )
+        self.assertIn('stdout: {"access_token":[REDACTED]}', message)
+        self.assertNotIn("should-not-appear", message)
+        which.assert_called_once_with("az")
+        run.assert_called_once()
+
+
+class RoleAssignmentIdsTests(unittest.TestCase):
+    @patch.object(migration, "run_az", return_value='["assignment-id"]')
+    def test_uses_supported_assignee_flag_at_the_exact_scope(
+        self, run_az: Mock
+    ) -> None:
+        assignment_ids = migration.role_assignment_ids(
+            "/storage-account/blobServices/default/containers/artifacts",
+            "principal-id",
+        )
+
+        self.assertEqual(assignment_ids, ["assignment-id"])
+        run_az.assert_called_once_with(
+            "role",
+            "assignment",
+            "list",
+            "--scope",
+            "/storage-account/blobServices/default/containers/artifacts",
+            "--assignee",
+            "principal-id",
+            "--role",
+            migration.BLOB_DATA_CONTRIBUTOR_ROLE_ID,
+            "--query",
+            "[].id",
+            "--output",
+            "json",
+        )
