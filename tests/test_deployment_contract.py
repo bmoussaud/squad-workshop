@@ -1,7 +1,9 @@
 import ast
+import json
 from pathlib import Path
 import re
 import shlex
+import subprocess
 import unittest
 
 
@@ -101,6 +103,19 @@ class DeploymentContractTests(unittest.TestCase):
             REPOSITORY_ROOT
             / "infra/scripts/retire_legacy_storage_blob_role.py"
         ).read_text(encoding="utf-8")
+        compiled_web = subprocess.run(
+            ["bicep", "build", str(INFRASTRUCTURE_ROOT / "web.bicep"), "--stdout"],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        if compiled_web.returncode:
+            raise AssertionError(
+                "Bicep compilation failed:\n"
+                f"{compiled_web.stdout}\n{compiled_web.stderr}"
+            )
+        cls.compiled_web_template = json.loads(compiled_web.stdout)
 
     def test_project_owned_bicep_uses_resource_group_scoped_avms_or_documented_fallbacks(self) -> None:
         templates = {
@@ -366,6 +381,45 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("virtualNetworkResourceId: privateVirtualNetwork.outputs.resourceId", private_dns_zone)
         self.assertNotIn("vnetConfiguration:", existing_environment)
         self.assertIn("environmentResourceId: containerAppsEnvironment.id", existing_app)
+
+    def test_compiled_private_blob_and_rbac_resources_wait_for_avm_deployments(self) -> None:
+        resources = self.compiled_web_template["resources"]
+
+        def dependency_text(resource: dict[str, object]) -> str:
+            return "\n".join(resource.get("dependsOn", []))
+
+        blob_private_endpoint = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Resources/deployments"
+            and "blob-private-endpoint" in resource["name"]
+        )
+        acr_pull_assignment = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Authorization/roleAssignments"
+            and "acrPullRoleDefinitionId" in resource["properties"]["roleDefinitionId"]
+        )
+        blob_data_assignment = next(
+            resource
+            for resource in resources
+            if resource["type"] == "Microsoft.Authorization/roleAssignments"
+            and "blobDataContributorRoleDefinitionId"
+            in resource["properties"]["roleDefinitionId"]
+        )
+
+        self.assertIn(
+            "format('storage-account-{0}', variables('resourceToken'))",
+            dependency_text(blob_private_endpoint),
+        )
+        self.assertIn(
+            "format('container-registry-{0}', variables('resourceToken'))",
+            dependency_text(acr_pull_assignment),
+        )
+        self.assertIn(
+            "format('storage-account-{0}', variables('resourceToken'))",
+            dependency_text(blob_data_assignment),
+        )
 
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")

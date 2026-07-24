@@ -226,6 +226,9 @@ module blobPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.9.1' = 
 		}
 		enableTelemetry: false
 	}
+	dependsOn: [
+		storageAccount
+	]
 }
 
 // native-bicep-fallback: The maintained managed-environment AVM requires a Log Analytics shared key for app logs, which violates the approved secretless telemetry contract.
@@ -551,6 +554,9 @@ resource privateContainerAppResource 'Microsoft.App/containerApps@2024-10-02-pre
 resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 	scope: containerRegistryResource
 	name: guid(containerRegistryResource.id, applicationIdentityPrincipalId, acrPullRoleDefinitionId)
+	dependsOn: [
+		containerRegistry
+	]
 	properties: {
 		principalId: applicationIdentityPrincipalId
 		principalType: 'ServicePrincipal'
@@ -563,6 +569,9 @@ resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 resource blobDataAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 	scope: artifactContainer
 	name: guid(artifactContainer.id, applicationIdentityPrincipalId, blobDataContributorRoleDefinitionId)
+	dependsOn: [
+		storageAccount
+	]
 	properties: {
 		principalId: applicationIdentityPrincipalId
 		principalType: 'ServicePrincipal'
