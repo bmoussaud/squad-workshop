@@ -253,6 +253,50 @@ class SmokeTestFailureTests(unittest.TestCase):
         self.assertEqual(result.live.attempts, 1)
         self.assertEqual(sleep.delays, [])
 
+    def test_each_retryable_status_is_retried_then_recovers(self) -> None:
+        # Per-status coverage: 408/429/502/503/504 must each be retried (one
+        # transient answer, then healthy => two attempts, one backoff sleep).
+        # A single representative case would let a regression silently drop one
+        # of these from the retryable set (mutation-confirmed) while CI stays
+        # green, so assert every member of RETRYABLE_STATUSES individually.
+        self.assertEqual(smoke.RETRYABLE_STATUSES, frozenset({408, 429, 502, 503, 504}))
+        for status in sorted(smoke.RETRYABLE_STATUSES):
+            with self.subTest(status=status):
+                transport = ScriptedTransport(
+                    live=[_resp(status), _live_ok()], ready=[_ready_ok()]
+                )
+                sleep = RecordingSleep()
+                result = smoke.run_smoke_test(
+                    BASE_URL,
+                    deadline_seconds=1000.0,
+                    transport=transport,
+                    sleep=sleep,
+                    monotonic=FakeClock(step=0.0),
+                )
+                self.assertTrue(result.passed, status)
+                self.assertEqual(result.live.attempts, 2, status)
+                self.assertEqual(sleep.delays, [1.0], status)
+
+    def test_each_non_retryable_status_fails_fast(self) -> None:
+        # The fail-fast side is only pinned by 404/500 in the base suite; assert
+        # a spread of other 4xx/5xx answers also fail on the first attempt with
+        # no backoff, so none of them can silently drift into the retryable set.
+        for status in (400, 401, 403, 404, 405, 409, 418, 451, 500, 501, 505):
+            with self.subTest(status=status):
+                transport = ScriptedTransport(live=[_resp(status)])
+                sleep = RecordingSleep()
+                result = smoke.run_smoke_test(
+                    BASE_URL,
+                    deadline_seconds=100000.0,
+                    transport=transport,
+                    sleep=sleep,
+                    monotonic=FakeClock(step=0.0),
+                )
+                self.assertFalse(result.passed, status)
+                self.assertEqual(result.live.reason_code, "unexpected_status", status)
+                self.assertEqual(result.live.attempts, 1, status)
+                self.assertEqual(sleep.delays, [], status)
+
     def test_200_with_wrong_body_fails_fast(self) -> None:
         transport = ScriptedTransport(
             live=[smoke.HttpResponse(200, json.dumps({"status": "not-what-we-deployed"}))]

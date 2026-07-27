@@ -14,7 +14,7 @@ import io
 import json
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "infra/scripts"
@@ -130,6 +130,53 @@ class PreflightCliFailClosedTests(unittest.TestCase):
         self.assertEqual(preflight._parse_count(""), -1)
         self.assertEqual(preflight._parse_count("-3"), -1)
         self.assertEqual(preflight._parse_count("x"), -1)
+
+    def test_tristate_bool_hostile_input_matrix_fails_closed(self) -> None:
+        # Only the exact strings ``true``/``false`` (case-insensitively, after
+        # trimming) are trust signals. Everything else is a malformed signal and
+        # MUST map to None so evaluate() fails closed.
+        self.assertIs(preflight._parse_tristate_bool("  true  "), True)
+        self.assertIs(preflight._parse_tristate_bool("True"), True)
+        self.assertIs(preflight._parse_tristate_bool("False"), False)
+        for hostile in (
+            "   ", "0", "yes", "no", "null", "None", "1", "+1", "5.0",
+            "on", "off", "tru", "truee", "тrue", "x" * 5000,
+        ):
+            self.assertIsNone(
+                preflight._parse_tristate_bool(hostile),
+                f"{hostile!r} must not be read as a boolean",
+            )
+
+    def test_parse_count_hostile_input_matrix_fails_closed(self) -> None:
+        self.assertEqual(preflight._parse_count("0"), 0)
+        self.assertEqual(preflight._parse_count("  7  "), 7)
+        for hostile in (
+            "-1", "+5", "5.0", "0x10", "1e3", " ", "null", "None",
+            "\u0665",   # Arabic-Indic 5: str.isdigit() True but non-ASCII
+            "\u00b2",   # superscript two: str.isdigit() True but int() raises
+            "x" * 5000,
+        ):
+            self.assertEqual(
+                preflight._parse_count(hostile), -1,
+                f"{hostile!r} must fail closed to -1",
+            )
+
+    def test_missing_required_arg_is_usage_error_exit_2(self) -> None:
+        # argparse usage errors exit 2, distinct from a policy BLOCKED (3), so a
+        # caller can tell "called wrong" from "refused by policy".
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stderr(io.StringIO()):
+                preflight.main([])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_proceed_and_skip_are_distinct_but_share_exit_zero(self) -> None:
+        proceed_code, proceed = _run()
+        skip_code, skip = _run(**{"--is-draft": "true"})
+        self.assertEqual(proceed_code, 0)
+        self.assertEqual(skip_code, 0)
+        self.assertNotEqual(proceed["decision"], skip["decision"])
+        self.assertEqual(proceed["decision"], "proceed")
+        self.assertEqual(skip["decision"], "skip")
 
 
 class PreflightCliOutputSafetyTests(unittest.TestCase):

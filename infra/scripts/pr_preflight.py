@@ -308,7 +308,12 @@ def _parse_count(raw: str) -> int:
     cap rather than silently treating an unknown count as zero.
     """
     stripped = raw.strip()
-    if stripped.isdigit():
+    # ``str.isdigit()`` is True for many non-ASCII code points (e.g. Arabic-Indic
+    # or superscript digits); some of those then raise in ``int()`` (superscript
+    # two) while others parse to a surprising value (Arabic-Indic five -> 5).
+    # Restrict to ASCII digits so an exotic/malformed count fails closed to -1
+    # instead of crashing or being silently accepted.
+    if stripped.isascii() and stripped.isdigit():
         return int(stripped)
     return -1
 
