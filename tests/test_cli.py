@@ -1,19 +1,18 @@
 import base64
-from io import BytesIO
 import json
-from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import httpx
 import openai
 from PIL import Image
 
+from fantasy_cards.adapters import ImageGenerationError, build_card_prompt
 from fantasy_cards.cli import main
-from fantasy_cards.adapters import ImageGenerationError
 from fantasy_cards.config import ConfigurationError
 
 
@@ -62,7 +61,7 @@ class CliTests(unittest.TestCase):
             self.assertIn(job["artifact"]["artifact_id"], artifact_path.name)
             self.assertEqual(
                 artifact_path.read_bytes(),
-                b"generated image for: A knight made of living flame",
+                b"generated card for: Ember Sentinel | A knight made of living flame",
             )
 
     def test_selects_foundry_provider_offline_from_environment(self) -> None:
@@ -114,9 +113,9 @@ class CliTests(unittest.TestCase):
             )
             client.images.generate.assert_called_once_with(
                 model="gpt-image-2-deployment",
-                prompt="A private original prompt",
+                prompt=build_card_prompt("Ember Sentinel", "A private original prompt"),
                 n=1,
-                size="1024x1024",
+                size="1024x1536",
             )
 
     def test_returns_safe_nonzero_result_for_configuration_failure(self) -> None:

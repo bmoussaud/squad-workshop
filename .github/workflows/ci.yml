@@ -15,10 +15,11 @@ jobs:
       - name: Validate pull request ownership
         if: github.event_name == 'pull_request'
         env:
-          EVENT_PATH: ${{ github.event_path }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          BODY: ${{ github.event.pull_request.body }}
         run: |
-          branch="$(jq -r '.pull_request.head.ref' "$EVENT_PATH")"
-          body="$(jq -r '.pull_request.body // ""' "$EVENT_PATH")"
+          branch="$BRANCH"
+          body="$BODY"
 
           if [[ ! "$branch" =~ ^squad/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
             echo "Pull request branches must use squad/{issue-number}-{kebab-case-slug}."

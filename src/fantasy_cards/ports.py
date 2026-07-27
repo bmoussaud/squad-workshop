@@ -2,11 +2,16 @@
 
 from typing import Protocol
 
-from fantasy_cards.domain import Artifact, ArtifactContent, GeneratedImage, GenerationJob
+from fantasy_cards.domain import (
+    Artifact,
+    ArtifactContent,
+    GeneratedImage,
+    GenerationJob,
+)
 
 
 class ImageGenerator(Protocol):
-    def generate(self, prompt: str) -> GeneratedImage: ...
+    def generate(self, title: str, prompt: str) -> GeneratedImage: ...
 
 
 class ArtifactStore(Protocol):

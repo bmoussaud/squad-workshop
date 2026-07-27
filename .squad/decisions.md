@@ -1,7 +1,6 @@
 # Squad Decisions
 
 ## Active Decisions
-
 ### 2026-07-22T12:33:43+0000: Azure resource configuration
 **By:** bmoussaud (via Copilot)
 **What:** Azure resources must always be configured through Bicep. Prefer Azure Verified Modules when a suitable maintained module exists; use native Bicep as the fallback.
@@ -91,6 +90,31 @@
 **By:** bmoussaud (via Copilot)
 **What:** Supersede the accidental native-only/no-AVM instruction recorded during this session. All project-owned Bicep resource implementations must use exact-version Azure Verified Modules. Native Bicep is allowed only when no suitable maintained AVM preserves the required contract, and each fallback must be documented.
 **Why:** User correction establishing the mandatory Azure infrastructure implementation policy and its explicit exception process.
+
+### 2026-07-27T08:47:25.103+02:00: Decouple legacy Blob role cleanup from azd deployment
+**By:** Copilot
+**What:** The account-scoped legacy `Storage Blob Data Contributor` assignment is retired only by the explicit `infra/scripts/retire_legacy_storage_blob_role.py` maintenance action after deployment. It is no longer an `azure.yaml` postprovision hook. The container-scoped assignment remains the required private Blob route and is created by Bicep.
+**Why:** RBAC enumeration and deletion require separate operator permissions, so coupling cleanup to `azd up` made otherwise successful application deployments fail. The maintenance script remains fail-closed by deleting only one verified direct legacy assignment after verifying exactly one direct container assignment.
+
+### 2026-07-27T08:47:25.103+02:00: Postprovision Azure CLI portability and failure policy
+**By:** Tank
+**What:** Resolve Azure CLI with `shutil.which("az")` and then `shutil.which("az.cmd")`; execute the resolved absolute path using an argument list with `shell=False` (the `subprocess` default). If Azure CLI is absent or cannot be started, the `azd` postprovision hook fails with an actionable, non-secret-bearing error.
+**Why:** RBAC migration postprovision hooks require Azure CLI. A successful no-op could silently preserve the retired account-scoped `Storage Blob Data Contributor` assignment and weaken least privilege; failing before deletion leaves existing assignments intact for safe retry.
+
+### 2026-07-27T08:47:25.103+02:00: Private app azd deployment target
+**By:** Tank
+**What:** Tag only `ca-fc-${resourceToken}-pvt` with `azd-service-name: web`; leave the original Container App fully provisioned without that tag as the manual rollback target. The private environment is external and its app has external ingress; this moves only the `azd` image-deployment target.
+**Why:** `azd` discovers Container Apps by service tag. Two tagged apps make publish-web ambiguous, while the VNet-integrated private app is the one with private Blob reachability. Product Owner approval remains required for any external traffic or domain change.
+
+### 2026-07-27T08:47:25.103+02:00: Private Container App naming
+**By:** Tank
+**What:** Name the private Container App `ca-fc-${resourceToken}-pvt`. The private managed-environment name remains unchanged because its current 38-character deployment name is within the 60-character managed-environment limit.
+**Why:** Container App names are limited to 32 characters. The lower-case 13-character `uniqueString` resource token keeps the name deterministic and unique; for `nrp2z4rl3jd32`, the name is `ca-fc-nrp2z4rl3jd32-pvt` (23 characters).
+
+### 2026-07-27T08:47:25.103+02:00: Card-layout visual contract for issue #11
+**By:** Benoit (via Squad Coordinator)
+**What:** Provider-backed generation now requests a portrait 1024x1536 fantasy trading-card layout through `build_card_prompt(title, description)`: ornate frame, top title banner, central art, and bottom stats/description area. The `ImageGenerator` port contract is `generate(title, prompt)`.
+**Why:** Issue #11 requires generated images to look like fantasy trading cards rather than square subject illustrations, and the explicit prompt/port contract keeps providers, tests, and adapters aligned.
 
 ## Governance
 

@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fantasy_cards.adapters import (
@@ -44,11 +44,11 @@ class GenerationServiceTests(unittest.TestCase):
         self.assertIn(job.artifact.artifact_id, artifact_path.name)
         self.assertEqual(
             artifact_path.read_bytes(),
-            b"generated image for: A knight made of living flame",
+            b"generated card for: Ember Sentinel | A knight made of living flame",
         )
         self.assertEqual(
             self.artifact_store.read(job.artifact.artifact_id),
-            b"generated image for: A knight made of living flame",
+            b"generated card for: Ember Sentinel | A knight made of living flame",
         )
         self.assertIs(
             self.job_repository.get_by_idempotency_key("idem-123"), job

@@ -1,14 +1,15 @@
 import importlib
-from contextlib import contextmanager
 import json
 import logging
 import os
 import socket
 import sys
+import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType
-from collections.abc import Iterator
-import unittest
 from unittest.mock import Mock, patch
 
 
@@ -20,6 +21,7 @@ class TelemetryContractTests(unittest.TestCase):
             "FANTASY_CARD_IMAGE_GENERATOR": "in-memory",
             "FANTASY_CARD_ARTIFACT_STORE": "filesystem",
             "FANTASY_CARD_OUTPUT_DIR": self.output_directory.name,
+            "USERPROFILE": str(Path.home()),
         }
 
     def fake_telemetry_modules(
@@ -59,8 +61,8 @@ class TelemetryContractTests(unittest.TestCase):
         network_error = AssertionError("network access is forbidden in telemetry tests")
         with patch.dict(os.environ, environment, clear=True), patch.dict(
             sys.modules, modules
-        ), patch.object(socket, "create_connection", side_effect=network_error), patch.object(
-            socket.socket, "connect", side_effect=network_error
+        ), patch.object(
+            socket, "create_connection", side_effect=network_error
         ):
             sys.modules.pop("fantasy_cards.web", None)
             sys.modules.pop("fantasy_cards.telemetry", None)
@@ -145,6 +147,7 @@ class TelemetryContractTests(unittest.TestCase):
 
     def test_generation_events_are_queryable_correlatable_and_payload_safe(self) -> None:
         from fastapi.testclient import TestClient
+
         from fantasy_cards.adapters import ImageGenerationError
 
         correlation_id = "11111111-1111-4111-8111-111111111111"
@@ -184,6 +187,7 @@ class TelemetryContractTests(unittest.TestCase):
 
     def test_blob_read_failure_emits_alert_compatible_safe_event(self) -> None:
         from fastapi.testclient import TestClient
+
         from fantasy_cards.adapters import ArtifactStorageError
 
         artifact_id = "22222222-2222-4222-8222-222222222222"

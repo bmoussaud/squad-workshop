@@ -1,29 +1,39 @@
-"""Image generation and in-memory persistence adapters."""
+"""Image generation and in-memory persistence adapters.
 
+Card image generators share an explicit visual contract: provider-backed
+generation must request a portrait fantasy trading-card layout with a decorative
+frame, top title banner, central subject illustration, and bottom stats area.
+"""
+
+import os
+import re
+import warnings
 from base64 import b64decode
 from binascii import Error as Base64Error
 from collections.abc import Callable
 from hashlib import sha256
 from io import BytesIO
-import os
 from pathlib import Path
-import re
 from tempfile import NamedTemporaryFile
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import uuid4
-import warnings
 
 from PIL import Image, UnidentifiedImageError
 
-from fantasy_cards.domain import Artifact, ArtifactContent, GeneratedImage, GenerationJob
+from fantasy_cards.domain import (
+    Artifact,
+    ArtifactContent,
+    GeneratedImage,
+    GenerationJob,
+)
 from fantasy_cards.telemetry import dependency_span, record_span_outcome
 
 
 class InMemoryImageGenerator:
-    def generate(self, prompt: str) -> GeneratedImage:
+    def generate(self, title: str, prompt: str) -> GeneratedImage:
         return GeneratedImage(
-            content=f"generated image for: {prompt}".encode(),
+            content=f"generated card for: {title} | {prompt}".encode(),
             media_type="text/plain",
             generator_name="in-memory",
         )
@@ -58,6 +68,20 @@ _ARTIFACT_EXTENSIONS = {
     "text/plain": ".txt",
 }
 _MAX_WEB_ARTIFACT_BYTES = 10 * 1024 * 1024
+_CARD_IMAGE_SIZE = "1024x1536"
+
+
+def build_card_prompt(title: str, description: str) -> str:
+    return (
+        f'Create a portrait fantasy trading-card layout for "{title}".\n'
+        "Render an ornate decorative border/frame that fills the canvas edges.\n"
+        f"Place a clear title banner at the TOP displaying exactly: {title}\n"
+        f"Use the described subject art as the central illustration: {description}\n"
+        "Add a stats/description area at the BOTTOM with readable fantasy card "
+        "details inspired by the subject.\n"
+        "Composition requirements: portrait trading card, framed collectible card, "
+        "not a plain square illustration."
+    )
 
 
 class ArtifactStorageError(RuntimeError):
@@ -76,7 +100,7 @@ class ArtifactNotFoundError(ArtifactStorageError):
 
 
 class LocalPngImageGenerator:
-    def generate(self, prompt: str) -> GeneratedImage:
+    def generate(self, title: str, prompt: str) -> GeneratedImage:
         image = Image.new("RGB", (768, 1024), "#17251d")
         output = BytesIO()
         image.save(output, format="PNG")
@@ -101,14 +125,17 @@ class FoundryImageGenerator:
         self._client_factory = client_factory
         self._client: _ImagesClient | None = None
 
-    def generate(self, prompt: str) -> GeneratedImage:
+    def generate(self, title: str, prompt: str) -> GeneratedImage:
+        card_prompt = build_card_prompt(title, prompt)
         with dependency_span("foundry", "generate") as span:
             try:
                 response = self._get_client().images.generate(
                     model=self._deployment,
-                    prompt=prompt,
+                    prompt=card_prompt,
                     n=1,
-                    size="1024x1024",
+                    # The deployed model/deployment must support this portrait size;
+                    # live validation remains a deployment follow-up.
+                    size=_CARD_IMAGE_SIZE,
                 )
             except Exception as error:
                 translated_error = _translate_provider_error(error)

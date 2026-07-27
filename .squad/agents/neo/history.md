@@ -20,3 +20,5 @@
 📌 Team update (2026-07-23T08:27:28+0000): Independently repaired the managed-identity Application Insights path and Storage/IaC security under strict reviewer lockout. With Application Insights local auth disabled, telemetry needs an explicit UAMI credential plus component-scoped Monitoring Metrics Publisher; Storage public access remains policy-disabled. — recorded by Scribe
 
 📌 Team update (2026-07-23T08:27:28+0000): A later telemetry test-isolation rejection locked Neo out of that artifact; @copilot owned the independent revision. The final repaired application is healthy at 100% traffic, generation remains safely degraded, and telemetry ingestion is propagation pending. — recorded by Scribe
+
+📌 Team update (2026-07-27T08:47:25.103+02:00): Live-endpoint validation of 1024x1536 output plus title/stats legibility remains an open follow-up on PR #13 — decided by Benoit (via Squad Coordinator).
