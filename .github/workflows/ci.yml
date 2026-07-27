@@ -21,16 +21,28 @@ jobs:
           branch="$BRANCH"
           body="$BODY"
 
-          if [[ ! "$branch" =~ ^squad/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
-            echo "Pull request branches must use squad/{issue-number}-{kebab-case-slug}."
+          # squad/{issue-number}-{kebab-case-slug} is a convention, not a gate:
+          # the Copilot app generates worktree branch names (e.g. bmoussaud-musical-spork)
+          # that can never match it. A non-conforming branch is fine; note it and move on.
+          branch_issue=""
+          if [[ "$branch" =~ ^squad/([1-9][0-9]*)-[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+            branch_issue="${BASH_REMATCH[1]}"
+          else
+            echo "::notice::Branch '$branch' does not follow the squad/{issue-number}-{kebab-case-slug} convention; skipping the branch-to-issue cross-check."
+          fi
+
+          # Hard gate: the PR body must close exactly one issue.
+          mapfile -t referenced_issues < <(grep -Eio '\b(closes|fixes|resolves)[[:space:]]+#[1-9][0-9]*\b' <<< "$body" | grep -Eo '[1-9][0-9]*' || true)
+
+          if [[ "${#referenced_issues[@]}" -ne 1 ]]; then
+            echo "Pull requests must close exactly one issue (use a closing keyword such as 'Closes #123' in the body)."
             exit 1
           fi
 
-          branch_issue="${BASH_REMATCH[1]}"
-          mapfile -t referenced_issues < <(grep -Eio '\b(closes|fixes|resolves)[[:space:]]+#[1-9][0-9]*\b' <<< "$body" | grep -Eo '[1-9][0-9]*' || true)
-
-          if [[ "${#referenced_issues[@]}" -ne 1 || "${referenced_issues[0]:-}" != "$branch_issue" ]]; then
-            echo "Pull requests must close exactly one issue matching the branch issue number."
+          # Conditional cross-check: only when the branch follows the convention,
+          # assert the closed issue matches the branch's issue number.
+          if [[ -n "$branch_issue" && "${referenced_issues[0]:-}" != "$branch_issue" ]]; then
+            echo "The closed issue (#${referenced_issues[0]:-}) must match the branch issue number (#$branch_issue)."
             exit 1
           fi
 
