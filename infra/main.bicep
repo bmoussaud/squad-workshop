@@ -9,11 +9,32 @@ param applicationLocation string = 'francecentral'
 @description('Short environment identifier applied to resource tags.')
 param environmentName string
 
+@description('Create a new Microsoft Foundry account/project/model deployment in this resource group. Defaults to true for main/prod; PR environments should set this to false and target the shared Foundry instance instead.')
+param deployFoundry bool = true
+
 @description('Globally unique Microsoft Foundry account name.')
 param foundryAccountName string
 
 @description('Microsoft Foundry project name.')
 param foundryProjectName string
+
+@description('Existing shared Microsoft Foundry account name. Required when deployFoundry is false.')
+param sharedFoundryAccountName string = ''
+
+@description('Existing shared Microsoft Foundry project name. Required when deployFoundry is false.')
+param sharedFoundryProjectName string = ''
+
+@description('Resource group containing the shared Microsoft Foundry account when deployFoundry is false. Defaults to this deployment resource group.')
+param sharedFoundryResourceGroupName string = ''
+
+@description('Create a new Azure Container Registry in this resource group. Defaults to true for main/prod; PR environments should set this to false and pull from the shared ACR instead.')
+param deployAcr bool = true
+
+@description('Existing shared Azure Container Registry name. Required when deployAcr is false.')
+param sharedContainerRegistryName string = ''
+
+@description('Resource group containing the shared Azure Container Registry when deployAcr is false. Defaults to this deployment resource group.')
+param sharedContainerRegistryResourceGroupName string = ''
 
 @description('User-assigned identity attached to the Foundry account.')
 param platformIdentityName string
@@ -85,8 +106,12 @@ module foundry 'foundry.bicep' = {
   params: {
     location: location
     tags: tags
+    deployFoundry: deployFoundry
     foundryAccountName: foundryAccountName
     foundryProjectName: foundryProjectName
+    sharedFoundryAccountName: sharedFoundryAccountName
+    sharedFoundryProjectName: sharedFoundryProjectName
+    sharedFoundryResourceGroupName: sharedFoundryResourceGroupName
     platformIdentityName: platformIdentityName
     applicationIdentityName: applicationIdentityName
     logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
@@ -105,6 +130,9 @@ module web 'web.bicep' = {
     location: applicationLocation
     tags: tags
     environmentName: environmentName
+    deployAcr: deployAcr
+    sharedContainerRegistryName: sharedContainerRegistryName
+    sharedContainerRegistryResourceGroupName: sharedContainerRegistryResourceGroupName
     applicationIdentityClientId: foundry.outputs.applicationIdentityClientId
     applicationIdentityPrincipalId: foundry.outputs.applicationIdentityPrincipalId
     applicationIdentityResourceId: foundry.outputs.applicationIdentityResourceId
