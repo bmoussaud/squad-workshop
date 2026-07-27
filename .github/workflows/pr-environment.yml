@@ -303,12 +303,25 @@ jobs:
         id: endpoint
         run: |
           set -euo pipefail
-          rg="$(azd env get-value AZURE_RESOURCE_GROUP)"
-          fqdn="$(az containerapp show \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$rg" \
-            --query "properties.configuration.ingress.fqdn" -o tsv)"
-          echo "app_url=https://${fqdn}" >> "$GITHUB_OUTPUT"
+          # azd-service-name:'web' is on the PRIVATE container app (web.bicep), so
+          # `azd deploy` only pushes our image there; the public app keeps the
+          # helloworld image and has no /health endpoints. Resolve the URL from the
+          # canonical azd output for the deployed service instead of querying an app
+          # by name. SERVICE_WEB_URI is ALREADY a full https://<fqdn>
+          # (main.bicep -> web.bicep serviceUri), so do NOT prepend a scheme.
+          # An empty-but-successful get-value must fail loudly HERE, not silently
+          # flow into the smoke test as a confusing far-from-the-cause failure;
+          # `set -euo pipefail` alone does not catch empty-but-zero-exit.
+          app_url="$(azd env get-value SERVICE_WEB_URI)"
+          case "$app_url" in
+            https://*)
+              ;;
+            *)
+              echo "::error::Resolved app URL is empty or not https:// (got: '${app_url}'); refusing to hand an unknown endpoint to the smoke test."
+              exit 1
+              ;;
+          esac
+          echo "app_url=${app_url}" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test (/health/live + /health/ready)
         id: smoke
@@ -366,14 +379,22 @@ jobs:
             const issue_number = context.issue.number;
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
 
+            // A smoke failure fails the deploy job, so DEPLOY_RESULT is not
+            // 'success' even though the app deployed. Detect "smoke ran and did
+            // not pass" from its outputs (which persist even though the step
+            // exited non-zero) so the developer sees the real smoke reason
+            // instead of a generic "did not complete". Healthy is reported ONLY
+            // when deploy succeeded AND smoke passed.
+            const smokeRan = process.env.SMOKE_PASSED === 'true'
+              || process.env.SMOKE_PASSED === 'false';
             let health;
-            if (!deployOk) {
-              health = '❌ Deployment did not complete';
-            } else if (smokePassed) {
+            if (deployOk && smokePassed) {
               health = '✅ Healthy — `/health/live` and `/health/ready` passed';
-            } else {
+            } else if (smokeRan && !smokePassed) {
               const detail = process.env.SMOKE_MESSAGE || 'smoke test did not pass';
               health = `⚠️ Smoke test failed — ${detail}`;
+            } else {
+              health = '❌ Deployment did not complete';
             }
 
             const appLine = appUrl
