@@ -30,3 +30,5 @@
 📌 Team update (2026-07-23T08:27:28+0000): Strict reviewer lockout was enforced across telemetry revisions: rejected authors did not revise the same artifact, Neo independently repaired managed-identity telemetry/security, and @copilot independently fixed telemetry test isolation before final approval. — recorded by Scribe
 
 📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, with acceptance coverage for successful and provider-failed event metadata and no sensitive request or dependency values. — decided by Trinity, Switch
+
+📌 Team update (2026-07-27T08:47:25.103+02:00): Independent review of the card-contract tests remains an open follow-up on PR #13 — decided by Benoit (via Squad Coordinator).
