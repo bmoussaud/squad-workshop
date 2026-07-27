@@ -1,13 +1,12 @@
 import json
 import os
+import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
-import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import UUID
-
 
 MAX_REQUEST_BYTES = 16 * 1024
 
@@ -27,10 +26,12 @@ class WebAcceptanceTests(unittest.TestCase):
             "FANTASY_CARD_MAX_GENERATION_CONCURRENCY": "1",
             "FANTASY_CARD_RATE_LIMIT_ATTEMPTS": "10",
             "FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS": "600",
+            "USERPROFILE": str(Path.home()),
         }
 
     def create_client(self):
         from fastapi.testclient import TestClient
+
         from fantasy_cards.web import create_app
 
         return TestClient(create_app())
@@ -292,6 +293,8 @@ class WebAcceptanceTests(unittest.TestCase):
                 self.assertNotIn("invalid-private-value", response.text)
 
     def test_blob_write_failure_returns_safe_artifact_unavailable_response(self) -> None:
+        from fastapi.testclient import TestClient
+
         from fantasy_cards.adapters import (
             ArtifactStorageError,
             BlobArtifactStore,
@@ -300,7 +303,6 @@ class WebAcceptanceTests(unittest.TestCase):
         )
         from fantasy_cards.application import GenerationService
         from fantasy_cards.config import WebApplication
-        from fastapi.testclient import TestClient
 
         private_endpoint = "https://policy-private.blob.core.windows.net"
         private_credential = "credential=private-secret"
@@ -448,7 +450,7 @@ class WebAcceptanceTests(unittest.TestCase):
         release = Event()
         first_response: list[object] = []
 
-        def blocking_generate(generator: object, prompt: str):
+        def blocking_generate(generator: object, title: str, prompt: str):
             from fantasy_cards.domain import GeneratedImage
 
             started.set()
@@ -500,8 +502,9 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertNotIn("location", missing.headers)
 
     def test_artifact_route_distinguishes_not_found_from_dependency_failures(self) -> None:
-        from fantasy_cards.adapters import ArtifactStorageError
         from fastapi.testclient import TestClient
+
+        from fantasy_cards.adapters import ArtifactStorageError
 
         artifact_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         private_detail = "storage account, credential chain, and provider response"

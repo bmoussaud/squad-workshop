@@ -24,7 +24,7 @@ class GenerationService:
         if existing_job is not None:
             return existing_job
 
-        image = self._image_generator.generate(request.prompt)
+        image = self._image_generator.generate(request.title, request.prompt)
         artifact = self._artifact_store.save(image.content, image.media_type)
         job = GenerationJob(
             job_id=str(uuid4()),

@@ -1,7 +1,7 @@
 import base64
-from io import BytesIO
 import json
 import unittest
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,6 +12,7 @@ from PIL import Image
 from fantasy_cards.adapters import (
     FoundryImageGenerator,
     ImageGenerationError,
+    build_card_prompt,
     create_foundry_client,
     normalize_azure_openai_endpoint,
 )
@@ -177,7 +178,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
             client_factory=factory,
         )
 
-        image = generator.generate("an original fantasy citadel")
+        image = generator.generate("Citadel of Dawn", "an original fantasy citadel")
 
         self.assertEqual(image.content, png)
         self.assertEqual(image.media_type, "image/png")
@@ -187,9 +188,9 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         )
         client.images.generate.assert_called_once_with(
             model="image-deployment",
-            prompt="an original fantasy citadel",
+            prompt=build_card_prompt("Citadel of Dawn", "an original fantasy citadel"),
             n=1,
-            size="1024x1024",
+            size="1024x1536",
         )
 
     def test_rejects_valid_png_with_trailing_bytes(self) -> None:
@@ -209,7 +210,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         )
 
         with self.assertRaises(ImageGenerationError) as raised:
-            generator.generate("private prompt")
+            generator.generate("Private", "private prompt")
 
         self.assertEqual(raised.exception.code, "invalid_response")
 
@@ -234,7 +235,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
                 )
 
                 with self.assertRaises(ImageGenerationError) as raised:
-                    generator.generate("private prompt")
+                    generator.generate("Private", "private prompt")
 
                 self.assertEqual(raised.exception.code, "invalid_response")
 
@@ -253,8 +254,8 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         )
 
         factory.assert_not_called()
-        generator.generate("first")
-        generator.generate("second")
+        generator.generate("First", "first")
+        generator.generate("Second", "second")
 
         factory.assert_called_once()
 
@@ -313,7 +314,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     ImageGenerationError, "invalid response"
                 ) as raised:
-                    generator.generate("private prompt")
+                    generator.generate("Private", "private prompt")
 
                 self.assertEqual(raised.exception.code, "invalid_response")
 
@@ -338,7 +339,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         )
 
         with self.assertRaises(ImageGenerationError) as raised:
-            generator.generate("private prompt")
+            generator.generate("Private", "private prompt")
 
         self.assertEqual(raised.exception.code, "invalid_response")
 
@@ -365,7 +366,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
                 )
 
                 with self.assertRaises(ImageGenerationError) as raised:
-                    generator.generate("private prompt")
+                    generator.generate("Private", "private prompt")
 
                 self.assertEqual(raised.exception.code, expected_code)
                 safe_message = str(raised.exception)
@@ -397,7 +398,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         )
 
         with self.assertRaises(ImageGenerationError) as raised:
-            generator.generate("private prompt")
+            generator.generate("Private", "private prompt")
 
         self.assertEqual(raised.exception.code, "provider_unavailable")
         self.assertEqual(
