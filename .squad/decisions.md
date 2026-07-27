@@ -1,6 +1,7 @@
 # Squad Decisions
 
 ## Active Decisions
+
 ### 2026-07-22T12:33:43+0000: Azure resource configuration
 **By:** bmoussaud (via Copilot)
 **What:** Azure resources must always be configured through Bicep. Prefer Azure Verified Modules when a suitable maintained module exists; use native Bicep as the fallback.
@@ -115,6 +116,11 @@
 **By:** Benoit (via Squad Coordinator)
 **What:** Provider-backed generation now requests a portrait 1024x1536 fantasy trading-card layout through `build_card_prompt(title, description)`: ornate frame, top title banner, central art, and bottom stats/description area. The `ImageGenerator` port contract is `generate(title, prompt)`.
 **Why:** Issue #11 requires generated images to look like fantasy trading cards rather than square subject illustrations, and the explicit prompt/port contract keeps providers, tests, and adapters aligned.
+
+### 2026-07-27T09:42:54.356+02:00: Per-PR ephemeral Azure environments (consolidated)
+**By:** Morpheus, Tank
+**What:** Use deterministic per-PR Azure environment names derived from PR number plus a sanitized meaningful title slug, with a stable hash suffix for Azure uniqueness and length safety (for example, `pr-14-render-card-layout-4717e5bb`). The MVP default is a trusted same-repo app-tier ephemeral deployment (Container Apps, Storage/artifacts, identity, ACR, monitoring, budget/alerts, and private Blob path as needed) bound to a shared, pre-approved Foundry account/project/model deployment. GitHub Actions should deploy on PR open/reopen/synchronize with OIDC, `azd provision`/`azd deploy`, PR-number concurrency, tags carrying PR/branch/owner/created/expires/environment-type metadata, and a PR comment with the app URL. Teardown runs on PR close/merge through `azd down --purge`, with a scheduled TTL janitor for orphaned tagged resource groups. Full-stack per-PR Foundry/model provisioning is an exception for Foundry, identity/RBAC, model deployment, regional, safety, or provider-contract changes and requires GitHub Environment approval, quota/cost preflight, budget acknowledgement, and automatic teardown. Enforce hard concurrency limits initially: no more than 3 app-tier environments and 1 cost-bearing Foundry environment until live cost/quota data supports more. Fork PRs run build/test only unless a trusted maintainer explicitly approves Azure credential exposure after reviewing the code. Post-deploy hooks should include health checks and a gated, sanitized live Foundry image-generation validation handoff for Switch/Neo tied to issue #4 and the issue #11 card-layout follow-up.
+**Why:** Per-PR review environments improve validation without bypassing existing approval boundaries for scarce, billable `gpt-image-2` capacity. App-tier ephemerals provide isolated review surfaces while shared Foundry binding controls quota, budget, security, and model-capacity blast radius. Approval gates, concurrency caps, TTL teardown, and fork restrictions preserve least privilege and cost control, while the validation hook keeps live image-generation evidence explicit and sanitized.
 
 ## Governance
 
