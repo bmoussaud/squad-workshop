@@ -47,3 +47,5 @@ Enforced Container Apps start-letter/end-alnum + min length 2 (regex + validator
 
 ### 2026-07-27T16:58:24+02:00 — Issue #25: relaxed CI ownership gate
 Dropped the hard branch-name regex failure in ci.yml's ownership step; `squad/{issue}-{slug}` is now a `::notice::` convention. Kept issue-closure (exactly one) as a hard gate and made the branch<->issue cross-check conditional (runs only for conforming branches). Preserved existing injection-safe env: handling of BODY. Validated 6 cases via throwaway bash harness incl. shell-injection body (no execution); 148 tests OK; actionlint unavailable (skipped).
+
+📌 Team update (2026-07-27T16:58:24.269+02:00): Rai independently reviewed commit 51336ce (issue #25 CI relaxation) and issued 🟢 GREEN. Injection safety confirmed; conditional cross-check is a typo-catcher, not a security control (documented honestly). Non-blocking advisories: duplicate `Closes #N` counts double (over-strict, pre-existing); grep matches keywords inside code fences (pre-existing). — reviewed by Rai
