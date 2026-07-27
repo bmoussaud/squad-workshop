@@ -217,6 +217,42 @@ Retry policy: RETRY on connection/timeout errors and HTTP `408, 429, 502, 503, 5
 
 **Why:** `azd-service-name: 'web'` is on the private container app so `azd deploy` ships our image only there; the public app keeps `containerapps-helloworld:latest` and serves no `/health/*`. The old URL-resolution step queried the wrong (public) app, guaranteeing 404 on every real deploy — a false smoke failure despite a good deploy. `set -euo pipefail` does not catch empty-but-zero-exit, so an explicit guard is required.
 
+### 2026-07-27T21:07:06+02:00: TTL reaper decision engine (Phase 4, #20, item B)
+**By:** Trinity
+**What:** Added `infra/scripts/pr_env_reaper.py` + `tests/test_pr_env_reaper.py` (53 tests). Pure stdlib decision engine that selects which per-PR ephemeral Azure resource groups the scheduled janitor may delete; performs no Azure calls. Strictly allowlist-based: reap only when `tags` is an object AND `tags.ephemeral == "true"` (exact lowercase) AND `environment-type == "pr-app"` AND valid numeric `pr-number` AND (`expires-at` aware+strictly-past OR `pr-number` in `--closed-pr-numbers`). Immediate delete on expiry (no grace period; resolves design-doc L272). Malformed expiry is KEEP (`malformed_expiry`), never "expired long ago"; naive timestamps rejected before comparison so no `TypeError`. Closed-PR trigger checked before expiry. Exit 0 on any successful evaluation; `MALFORMED_INPUT_EXIT_CODE = 3` for bad JSON/non-array/naive `--now`; usage stays 2. Names sanitized via `_sanitize_log`. Reason codes — reap: `expired`, `orphaned_closed_pr`; keep: `malformed_group`, `no_tags`, `not_ephemeral`, `wrong_environment_type`, `missing_pr_number`, `malformed_pr_number`, `malformed_expiry`, `not_yet_expired`. Did NOT touch workflows (Tank item A), Bicep, `pr_preflight`, `pr_smoke_test`, `pr_environment_names`. Full suite: 245 OK (192 baseline + 53).
+**Why:** The janitor workflow needs a provably safe decision engine that can be proven correct by unit tests alone. Strictly allowlist-based means all ambiguous/malformed input defaults to KEEP. Pure stdlib + injected clock makes it fully hermetic and testable.
+
+### 2026-07-27T21:04:25+02:00: PR-env close-time teardown + daily TTL janitor (Phase 4, #20, item A)
+**By:** Tank
+**What:** Added `.github/workflows/pr-environment-teardown.yml` (`pull_request: closed`, both merge+abandon) and `.github/workflows/pr-environment-janitor.yml` (`schedule` daily + `workflow_dispatch` with `dry_run` input).
+
+Key decisions:
+1. **Teardown mechanism = tag-scoped `az group delete`, not `azd down --purge`.** `azd down` requires azd environment state that does not exist on a fresh runner. PR stacks set `DEPLOY_FOUNDRY=false` and contain no per-PR Key Vault — the only resource types `--purge` reclaims — so `az group delete` is functionally equivalent.
+2. **Separate concurrency group `pr-azure-teardown-<n>` with `cancel-in-progress: false`.** The deploy workflow's `cancel-in-progress: true` (group `pr-azure-<n>`) can never cancel an in-flight teardown; `cancel-in-progress: false` prevents a duplicate closed event from cancelling a teardown already in progress.
+3. **Idempotency:** empty tag-match set is the expected no-op (exit 0). Real `az group delete` failures fail the run; only "already gone" treated as success.
+4. **Fork safety:** teardown job skipped at job level (`head.repo.fork == false`).
+5. **Janitor decision is the reaper's, never bash.** Authoritative reap/keep verdict comes from `infra/scripts/pr_env_reaper.py --format env`; delete loop iterates strictly over `reap_names`. `--now` injected explicitly; closed PRs passed via `--closed-pr-numbers`.
+6. **Dry-run:** `workflow_dispatch` input `dry_run=true` reports without deleting.
+
+Security: no `github.event.*` interpolated into `run:` blocks; third-party actions SHA-pinned; least-privilege permissions per job.
+**Why:** Completing the PR-environment lifecycle requires both a guaranteed close-time cleanup and a backstop janitor for orphaned environments. The azd-state-free `az group delete` approach is the only reliable teardown on a fresh runner. Separate concurrency ensures cleanup is never interrupted by an obsolete deploy — per design doc L114.
+
+### 2026-07-27: Phase 4 teardown/janitor security review — 🟢 GREEN (#20)
+**By:** Rai (RAI/security reviewer)
+**Artifacts reviewed:** `infra/scripts/pr_env_reaper.py` (Trinity, 5677e3f); `.github/workflows/pr-environment-teardown.yml` + `pr-environment-janitor.yml` (Tank, e6d2b2e)
+**What:** Ratified Phase 4 artifacts as safe to ship. Proved the reaper's allowlist adversarially by running it against crafted hostile JSON: odd casing, whitespace, `tags:null`, tags-as-list, JSON boolean `true`, tz-naive expiry, non-ASCII pr-number, garbage closed-PR tokens, embedded newline in name — every non-ephemeral / ambiguous case is KEPT. Confirmed the identity gates run BEFORE any expiry/closed check, so a stale `expires-at` on a shared/production RG can never trigger a delete. Malformed input exits 3 → `set -e`+`pipefail` in janitor → run fails → no delete. Accepted Tank's `az group delete` deviation: PR stacks create no Key Vault and no Cognitive Services account, so `--purge` reclaims nothing. Two non-blocking advisories raised (both fixed by Tank in the advisory pass): (1) teardown comment overstated PR_NUMBER validation; (2) `az group list` failure reported as false no-op.
+**Why:** When an unattended scheduled deleter is the artifact under review, the reviewer must prove the allowlist rather than accept it — empirical hostile-input runs are what convert the "allowlist-based" claim into evidence.
+
+### 2026-07-27: Phase 4 TTL reaper test review — APPROVE WITH CHANGES (#20)
+**By:** Switch (QA/test)
+**What:** Reviewed `infra/scripts/pr_env_reaper.py` + `tests/test_pr_env_reaper.py` (commit 5677e3f, Trinity). Applied 16 mutations: all 8 of Trinity's claimed-caught mutations verified empirically caught; of 8 additional mutations, 7 caught and 1 survived. The surviving mutation: setting `MALFORMED_INPUT_EXIT_CODE = 0` — every malformed-input test asserted `code == reaper.MALFORMED_INPUT_EXIT_CODE`, so the assertion moved with the constant and the "never exit 0 on garbage" invariant was not pinned to a concrete non-zero literal. Fix: added `test_malformed_input_exit_code_is_a_nonzero_literal` pinning the constant to `3` and asserting a real malformed run returns non-zero literal `3`. Catastrophe guard confirmed: shared-foundry with stale-2000 `expires-at` is KEPT (identity gates run before expiry). Tests fully hermetic (no wall-clock/network/sleep). 245 → 246 tests.
+**Why:** The exit code carries a real security guarantee relied upon by Rai's GREEN verdict (malformed input fails the janitor run, preventing deletion). Nothing in the test suite actually pinned that guarantee to a concrete value until this change.
+
+### 2026-07-27: Teardown must fail loudly on query failure, not report a false no-op (#20)
+**By:** Tank
+**What:** Fixed two non-blocking advisories in `.github/workflows/pr-environment-teardown.yml`. Advisory 2 (silent skip): `az group list` ran under `set -uo pipefail` (no `-e`); a failed query left `matches` empty and the idempotency branch reported a false `status=noop` exit 0, leaking the resource group. Fix: capture the `az group list` exit status explicitly (`matches="$(...)" || query_rc=$?`) and `exit 1` when `query_rc != 0`; empty-but-successful result still no-ops with `status=noop` exit 0. Advisory 1 (comment overstatement): added real `^[0-9]+$` guard on `PR_NUMBER` before it reaches `--query` rather than softening the comment — makes the "validated integer" claim true. Proved via bash: failing query → exit 1 (loud); empty-but-successful query → `status=noop`, exit 0; guard accepts `42`, rejects `42; rm -rf` and empty string. Suite: 246 tests OK.
+**Why:** A silently-false no-op on an Azure query failure leaves a resource group alive and billing for up to 24 hours (until the janitor next runs), while showing a green run — directly contrary to the purpose of Phase 4. An actual `^[0-9]+$` guard removes reliance on the reader knowing GitHub's payload schema.
+
 ## Governance
 
 - All meaningful changes require team consensus
