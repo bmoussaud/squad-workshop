@@ -150,6 +150,73 @@
 **What:** In `.github/workflows/ci.yml`, the "Validate pull request ownership" step no longer fails on non-conforming head-branch names. The `squad/{issue-number}-{kebab-case-slug}` pattern is now a convention (emitted as `::notice::` when unmatched), not a gate. The requirement that the PR body close exactly one issue remains a hard failure. The branch↔issue cross-check is kept **conditionally**: it runs only when the branch matches the convention, so conforming branches still get the guarantee while app-generated worktree names (e.g. `bmoussaud-musical-spork`) pass.
 **Why:** The Copilot app generates worktree branch names that can never satisfy the regex, so every app-authored PR failed the gate at creation and needed a manual branch rename (see #25, PR #24). Relaxing the branch check requires no coordination with app naming; keeping issue-closure strict preserves the half of the gate that carries real value. Body is attacker-controlled on fork PRs and is passed via `env:` and read as `"$BODY"` (no `${{ }}` interpolation into `run:`) — injection-safe; this was already correct and was preserved.
 
+### 2026-07-27T17:14:24.871+02:00: PR-environment Bicep name parameterization contract (#15, work item A)
+
+**By:** Tank
+
+**What:** `infra/web.bicep` no longer constructs its resource names from `environmentName`/`resourceToken`. `containerAppName`, `containerAppsEnvironmentName`, `storageAccountName`, and the private `virtualNetworkName` are now parameters on both `web.bicep` and `main.bicep`, wired in `main.bicepparam` via `readEnvironmentVariable(...) , '')`. Each defaults to `''`; when empty the template falls back to the exact pre-existing dev-derived value, so `dev` deploys unchanged (verified: with only `AZURE_ENV_NAME=dev` set, all four resolve to `''`). The authoritative CLI→env-var mapping is `BICEPPARAM_ENV_VARS` in `infra/scripts/pr_environment_names.py`, and `pr_environment_names.py --format envvars` emits `NAME=value` lines ready for `$GITHUB_ENV`:
+
+| naming key | env var | Bicep param |
+| --- | --- | --- |
+| `environment_name` | `AZURE_ENV_NAME` | `environmentName` |
+| `container_app` | `CONTAINER_APP_NAME` | `containerAppName` |
+| `managed_environment` | `CONTAINER_APPS_ENVIRONMENT_NAME` | `containerAppsEnvironmentName` |
+| `storage_account` | `STORAGE_ACCOUNT_NAME` | `storageAccountName` |
+| `virtual_network` | `VIRTUAL_NETWORK_NAME` | `virtualNetworkName` |
+| `application_insights` | `APPLICATION_INSIGHTS_NAME` | `applicationInsightsName` |
+
+The naming module gained a bounded `virtual_network` name (anchored to the compacted `managed_environment`, so ≤45 chars, never overflowing the 64-char VNet limit) and a `--format envvars` emitter.
+
+**Why:** Phase 1's names were consumed by nothing; `web.bicep` would build `ca-fantasy-cards-pr-26-relax-ci-ownership-gate-8ba70a79` (55 chars vs 32 limit) and `vnet-fantasy-cards-...-private` (65 vs 64), failing `azd provision` on the first PR. Parameterizing the Phase 1→Phase 3 seam fixes the overflow without reopening merged Phase 2 work and keeps the Python module the single source of truth for name shapes. The `virtual_network` overflow (65 chars) was a genuine bug beyond the three names the seam decision named; the other private names are safe by derivation. For work item B (the workflow): export the `--format envvars` block to `$GITHUB_ENV` before `azd provision`. Identity params are deliberately NOT in this contract — one `managed_identity` token does not map onto two identities — so B owns identity-name wiring.
+
+### 2026-07-27T17:14:24.871+02:00: PR smoke-test script retry contract (#15, item C)
+**By:** Trinity
+**What:** Added `infra/scripts/pr_smoke_test.py`, a stdlib-only post-deploy smoke test the Phase 3 workflow calls after `azd deploy`. It polls `GET /health/live` then `GET /health/ready` with bounded exponential backoff against one shared hard deadline, and emits a machine-readable verdict.
+
+CLI contract: Args: `--base-url` (required, must be http/https), `--deadline-seconds` (default 180), `--request-timeout-seconds` (default 10), `--initial-backoff-seconds` (1.0), `--max-backoff-seconds` (15.0), `--backoff-multiplier` (2.0), `--format {env,json}` (default env). Output keys: `passed`, `reason_code`, `message`, `base_url`, `elapsed_seconds`, `total_attempts`, `live_healthy`, `live_status`, `live_attempts`, `live_reason`, `ready_healthy`, `ready_status`, `ready_attempts`, `ready_reason`. Exit codes: 0 = pass, 1 = smoke failure, 2 = usage/config error.
+
+Retry policy: RETRY on connection/timeout errors and HTTP `408, 429, 502, 503, 504`. FAIL FAST on `404`, other `4xx`, `500`, and `200` with wrong JSON body. TLS verification always on; response bodies truncated + control-character-stripped before any log output.
+
+**Why:** Cold-started Container Apps fail their first probes; retrying only transient statuses with a hard deadline gives a reliable verdict without burning CI time on non-transient answers. Scope was the script only; no Bicep, workflow, or app code was touched.
+
+### 2026-07-27T20:05:43+02:00: Phase 3 PR-environment seam review — APPROVE WITH CHANGES (#15)
+**By:** Morpheus (architecture/contract review)
+**Reviewed:** commits `5bdc904` (item A, Tank), `3cc3d16` (item C, Trinity), `e0d2d64` (item B, salvaged/Tank)
+
+**What:** The Phase 1→Phase 3 Bicep naming seam is now correctly closed. `infra/web.bicep` no longer reconstructs `containerAppName`, `containerAppsEnvironmentName`, `storageAccountName`, or the private `virtualNetworkName` from `environmentName`/`resourceToken`; all four are now parameters threaded from `main.bicepparam` and emitted by `pr_environment_names.py --format envvars`. Every empty-string fallback reproduces the exact pre-existing dev value. Tank's third overflow claim (`privateVirtualNetworkName` at 65 chars vs the 64-char VNet limit) is verified real and fixed. The identity mapping is resolved correctly: both `PLATFORM_IDENTITY_NAME` and `APPLICATION_IDENTITY_NAME` derive from the bounded `CONTAINER_APPS_ENVIRONMENT_NAME` with distinct `-plat`/`-app` suffixes. The env-var contract is closed end to end: all six emitted keys are read by `main.bicepparam`; nothing is emitted-but-unused or read-but-unemitted. RG tagging (all 8 tags incl. the Phase-4-critical immutable `pr-number`) is correctly placed in the workflow. `azd provision` then `azd deploy` are separate steps; no `azd up`.
+
+**REQUIRED CHANGE (blocking, owner: Trinity):** The "Resolve app URL" step resolves the smoke-test FQDN from `$CONTAINER_APP_NAME` — the *public* container app. But `azd-service-name: 'web'` is on the *private* container app, so `azd deploy` pushes the real image only there; the public app keeps `containerapps-helloworld:latest`, which serves no `/health/*`. Fix: resolve the URL from `azd env get-value SERVICE_WEB_URI` (already `https://<fqdn>`), not `$CONTAINER_APP_NAME`.
+
+**Why:** The seam fix and its dev backward-compat are sound and merge-safe. The single wiring defect is exactly the kind of contract mismatch that only surfaces on the first real PR deploy, so it must be fixed before merge.
+
+**Non-blocking notes:** (1) App-tier concurrency cap counts RGs by tag, but tags are applied only after `azd provision`, so two simultaneous first-time PRs can both pass the cap before either tags — best-effort, acceptable for Phase 3. (2) `privateContainerAppsEnvironmentName` = bounded token + `-private` is safe only because long PR env names compact the managed-environment token to ~13 chars.
+
+### 2026-07-27T20:04:31+02:00: Switch — Phase 3 (#15) test-quality review: APPROVE WITH CHANGES
+**By:** Switch (Quality Engineer)
+**Scope:** Test quality only for commits `5bdc904` (naming/Bicep, Tank), `3cc3d16` (smoke test, Trinity), `e0d2d64` (PR-deploy workflow + `pr_preflight` CLI, salvaged/unreviewed).
+
+**Verdict:** APPROVE WITH CHANGES — changes made and committed (`a94f973`); full suite 192 OK (+6). Three reviewed modules run 111 tests in ~0.05s: fully hermetic, no real sleeps or network.
+
+**What (changes made):**
+- `pr_preflight._parse_count` used `str.isdigit()` then `int()` — crashes on some Unicode "digits" (`²`) and silently accepts others (Arabic-Indic `٥`→5). Hardened to ASCII-only (fail closed to `-1`). LOW severity but a claimed fail-closed path that crashed.
+- Added hostile-input matrix for both parsers, a usage exit-2 assertion, and an explicit PROCEED≠SKIP distinctness check.
+- Smoke retry set `{408,429,502,503,504}` was pinned only by a single `503` case — hand mutation shrinking it survived the suite. Added per-status retry-then-recover and per-status fail-fast coverage.
+- `virtual_network` name is length-bounded by test at the boundary with adversarial inputs; mutation re-anchoring it caught.
+- No pre-existing test was modified in any of the three commits.
+
+**Why:** The suite passing after a salvage commit is not evidence of good tests. Two coverage gaps (one on a fail-closed security-adjacent parser) were only found by hand mutation testing; both are now closed with regression tests committed to `bmoussaud-musical-spork` (`a94f973`, references #15).
+
+### 2026-07-27: PR-environment URL resolution and smoke-failure comment surfacing (#15, fix pass)
+**By:** Trinity
+**What:**
+1. **Resolved the app URL from the canonical azd output**, not by container-app name. Uses `azd env get-value SERVICE_WEB_URI` (`main.bicep` → `web.bicep serviceUri`). It already yields a full `https://<fqdn>`, so no scheme is prepended. Dropped `az containerapp show` and the resource-group lookup.
+2. **Fails loudly on an empty/invalid URL.** A `case` guard requires the value to start with `https://`; otherwise emits `::error::` and `exit 1`. `set -euo pipefail` alone does not catch an empty-but-zero-exit `get-value`.
+3. **Surfaced smoke-failure detail in the PR comment (Rai A1).** A smoke failure fails the deploy job, so the old code always rendered "Deployment did not complete", making the smoke-failed branch dead code. Now: healthy only when `deployOk && smokePassed`; if smoke ran and did not pass, show the real smoke message; otherwise "did not complete".
+
+**Scope deliberately untouched:** `infra/scripts/pr_smoke_test.py`, all Bicep, `pr_preflight.py`. No new `${{ github.event.* }}` added inside `run:` blocks. Verified statically: YAML parses, 192 tests OK. UNPROVEN until a real Azure run: the actual `azd deploy` → `SERVICE_WEB_URI` → smoke path.
+
+**Why:** `azd-service-name: 'web'` is on the private container app so `azd deploy` ships our image only there; the public app keeps `containerapps-helloworld:latest` and serves no `/health/*`. The old URL-resolution step queried the wrong (public) app, guaranteeing 404 on every real deploy — a false smoke failure despite a good deploy. `set -euo pipefail` does not catch empty-but-zero-exit, so an explicit guard is required.
+
 ## Governance
 
 - All meaningful changes require team consensus
