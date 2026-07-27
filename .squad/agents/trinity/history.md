@@ -26,3 +26,6 @@
 📌 Team update (2026-07-23T08:27:28+0000): Entra-authenticated Application Insights export requires explicit `ManagedIdentityCredential(client_id=AZURE_CLIENT_ID)` when local authentication is disabled; configured telemetry must remain isolated from default offline tests. Final test-isolation revision ownership moved independently under strict reviewer lockout. — recorded by Scribe
 
 📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, while startup logging records only telemetry configuration selection and OpenTelemetry events remain separate. — decided by Trinity, Switch
+
+### 2026-07-27T17:14:24.871+02:00: PR post-deploy smoke-test script (#15, item C)
+Added `infra/scripts/pr_smoke_test.py` + `tests/test_pr_smoke_test.py` (17 tests). Stdlib-only script polls `/health/live` then `/health/ready` with bounded exponential backoff against one hard deadline, injectable transport/sleep/clock, frozen dataclass results, env/json CLI, exit 0/1/2. Retries connection errors and HTTP 408/429/502/503/504; fails fast on 404/other-4xx/500 and wrong 200 bodies. TLS verification always on; response bodies truncated + control-char sanitized before any log output. Scope was the script only (Bicep/workflow are Tank's items A/B). Full suite: 165 pass (148 baseline + 17).
