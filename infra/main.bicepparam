@@ -3,6 +3,10 @@ using './main.bicep'
 param location = 'swedencentral'
 param applicationLocation = 'francecentral'
 param environmentName = readEnvironmentVariable('AZURE_ENV_NAME')
+param containerAppName = readEnvironmentVariable('CONTAINER_APP_NAME', '')
+param containerAppsEnvironmentName = readEnvironmentVariable('CONTAINER_APPS_ENVIRONMENT_NAME', '')
+param storageAccountName = readEnvironmentVariable('STORAGE_ACCOUNT_NAME', '')
+param virtualNetworkName = readEnvironmentVariable('VIRTUAL_NETWORK_NAME', '')
 param deployFoundry = bool(readEnvironmentVariable('DEPLOY_FOUNDRY', 'true'))
 param foundryAccountName = readEnvironmentVariable('FOUNDRY_ACCOUNT_NAME', 'fnd-fantasy-cards-dev-8f327f8c')
 param foundryProjectName = readEnvironmentVariable('FOUNDRY_PROJECT_NAME', 'prj-fantasy-cards-dev-8f327f8c')

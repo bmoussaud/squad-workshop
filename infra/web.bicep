@@ -28,21 +28,33 @@ param budgetStartDate string
 param alertContactEmails array
 param enableApplicationSignalAlerts bool
 
+@description('Precomputed Container App resource name from the Phase 1 naming module (CONTAINER_APP_NAME). Empty falls back to the dev-derived ca-fantasy-cards-<environmentName>, which overflows the 32-char Container App limit for long PR environment names; PR environments MUST supply this.')
+param containerAppName string = ''
+
+@description('Precomputed Container Apps managed environment name from the Phase 1 naming module (CONTAINER_APPS_ENVIRONMENT_NAME). Empty falls back to the dev-derived cae-fantasy-cards-<environmentName>; PR environments MUST supply this.')
+param containerAppsEnvironmentName string = ''
+
+@description('Precomputed Storage account name from the Phase 1 naming module (STORAGE_ACCOUNT_NAME). Empty falls back to the dev-derived stfc<resourceToken>. PR environments SHOULD supply this so the name is stable and hash-anchored rather than uniqueString-derived.')
+param storageAccountName string = ''
+
+@description('Precomputed private app-tier VNet name (VIRTUAL_NETWORK_NAME). Empty falls back to the dev-derived vnet-fantasy-cards-<environmentName>-private, which overflows the 64-char VNet limit for long PR environment names; PR environments MUST supply this.')
+param virtualNetworkName string = ''
+
 var resourceToken = toLower(uniqueString(subscription().subscriptionId, resourceGroup().id, environmentName))
-var containerAppName = 'ca-fantasy-cards-${environmentName}'
-var containerAppsEnvironmentName = 'cae-fantasy-cards-${environmentName}'
+var containerAppNameEffective = empty(containerAppName) ? 'ca-fantasy-cards-${environmentName}' : containerAppName
+var containerAppsEnvironmentNameEffective = empty(containerAppsEnvironmentName) ? 'cae-fantasy-cards-${environmentName}' : containerAppsEnvironmentName
 var containerRegistryName = 'acrfantasycards${resourceToken}'
-var storageAccountName = 'stfc${resourceToken}'
+var storageAccountNameEffective = empty(storageAccountName) ? 'stfc${resourceToken}' : storageAccountName
 var blobContainerName = 'artifacts'
 var monitoringMetricsPublisherRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
 var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
 var blobDataContributorRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
 var privateContainerAppName = 'ca-fc-${resourceToken}-pvt'
-var privateContainerAppsEnvironmentName = '${containerAppsEnvironmentName}-private'
-var privateVirtualNetworkName = 'vnet-fantasy-cards-${environmentName}-private'
+var privateContainerAppsEnvironmentName = '${containerAppsEnvironmentNameEffective}-private'
+var privateVirtualNetworkName = empty(virtualNetworkName) ? 'vnet-fantasy-cards-${environmentName}-private' : virtualNetworkName
 var privateInfrastructureSubnetName = 'snet-container-apps-infrastructure'
 var privateEndpointSubnetName = 'snet-private-endpoints'
-var privateEndpointName = 'pe-${storageAccountName}-blob'
+var privateEndpointName = 'pe-${storageAccountNameEffective}-blob'
 var privateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var resolvedSharedContainerRegistryResourceGroupName = empty(sharedContainerRegistryResourceGroupName) ? resourceGroup().name : sharedContainerRegistryResourceGroupName
 
@@ -73,7 +85,7 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' =
 module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
 	name: 'storage-account-${resourceToken}'
 	params: {
-		name: storageAccountName
+		name: storageAccountNameEffective
 		location: location
 		tags: tags
 		skuName: 'Standard_LRS'
@@ -166,7 +178,7 @@ module sharedAcrRbac 'modules/shared-acr-rbac.bicep' = if (!deployAcr) {
 var containerRegistryLoginServer = deployAcr ? containerRegistry.outputs.loginServer : sharedAcrRbac.outputs.loginServer
 
 resource storageAccountResource 'Microsoft.Storage/storageAccounts@2025-01-01' existing = {
-	name: storageAccountName
+	name: storageAccountNameEffective
 }
 
 resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2025-01-01' existing = {
@@ -283,7 +295,7 @@ resource privateContainerAppsEnvironment 'Microsoft.App/managedEnvironments@2024
 
 // native-bicep-fallback: The maintained managed-environment AVM requires a Log Analytics shared key for app logs, which violates the approved secretless telemetry contract.
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-preview' = {
-	name: containerAppsEnvironmentName
+	name: containerAppsEnvironmentNameEffective
 	location: location
 	tags: tags
 	properties: {
@@ -306,7 +318,7 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-
 module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 	name: 'container-app-${resourceToken}'
 	params: {
-		name: containerAppName
+		name: containerAppNameEffective
 		location: location
 		tags: tags
 		managedIdentities: {
@@ -565,7 +577,7 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 }
 
 resource containerAppResource 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
-	name: containerAppName
+	name: containerAppNameEffective
 }
 
 resource privateContainerAppResource 'Microsoft.App/containerApps@2024-10-02-preview' existing = {
