@@ -32,3 +32,5 @@
 📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, with acceptance coverage for successful and provider-failed event metadata and no sensitive request or dependency values. — decided by Trinity, Switch
 
 📌 Team update (2026-07-27T08:47:25.103+02:00): Independent review of the card-contract tests remains an open follow-up on PR #13 — decided by Benoit (via Squad Coordinator).
+
+📌 Team update (2026-07-27T09:42:54.356+02:00): Per-PR ephemeral Azure environment design includes a gated post-deploy live-Foundry validation hook for sanitized image-generation evidence, tied to issue #4 and the issue #11 card-layout follow-up. — decided by Morpheus, Tank
