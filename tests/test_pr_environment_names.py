@@ -66,6 +66,18 @@ class SlugExtractionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             naming.slug_from_branch("   ")
 
+    def test_path_traversal_and_separators_are_neutralized(self) -> None:
+        # Slashes/dots from a traversal-style branch must collapse to safe
+        # hyphen-delimited tokens, never leak '.' or '/' into a resource name.
+        slug = naming.slug_from_branch("squad/14-../../etc/passwd")
+        self.assertEqual(slug, "etc-passwd")
+        self.assertRegex(slug, r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+    def test_unicode_and_uppercase_are_sanitized_to_ascii_slug(self) -> None:
+        slug = naming.slug_from_branch("squad/14-Caf\u00e9-Draft")
+        self.assertEqual(slug, "caf-draft")
+        self.assertRegex(slug, r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
 
 class Hash8Tests(unittest.TestCase):
     def test_exact_input_format_repo_pipe_number_pipe_slug(self) -> None:
@@ -226,6 +238,23 @@ class PropertySweepTests(unittest.TestCase):
                 self.assertTrue(names.environment_name.endswith(names.hash8))
 
 
+class ManagedEnvironmentCompactionTests(unittest.TestCase):
+    def test_long_env_name_compacts_to_pr_token_plus_hash(self) -> None:
+        # pr-14-render-card-layout-<hash> is 33 chars (> defensive 32), so the
+        # managed environment must fall back to the pr{n}-{hash8} compaction and
+        # still start with a letter / end alphanumeric.
+        names = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
+        self.assertGreater(len(names.environment_name), 32)
+        self.assertEqual(names.managed_environment, f"pr14-{names.hash8}")
+        self.assertRegex(names.managed_environment, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+
+    def test_short_env_name_used_verbatim(self) -> None:
+        # A short slug keeps the full env name (fits within 32).
+        names = naming.compute_names(REPO, 5, "squad/5-x")
+        self.assertLessEqual(len(names.environment_name), 32)
+        self.assertEqual(names.managed_environment, names.environment_name)
+
+
 class CliTests(unittest.TestCase):
     def test_env_format_emits_key_values(self) -> None:
         import io
@@ -364,6 +393,25 @@ class PreflightTests(unittest.TestCase):
     def test_foundry_first_environment_proceeds(self) -> None:
         result = _evaluate(requires_foundry=True, active_foundry_env_count=0)
         self.assertIs(result.decision, preflight.Decision.PROCEED)
+
+    def test_app_cap_above_three_stays_blocked(self) -> None:
+        # Boundary above the cap: a count of 4 must remain BLOCKED (>= semantics,
+        # not an exact-equality check that could fail open past the cap).
+        result = _evaluate(active_app_env_count=4)
+        self.assertIs(result.decision, preflight.Decision.BLOCKED)
+        self.assertEqual(result.reason_code, "app_concurrency_cap")
+
+    def test_foundry_cap_above_one_stays_blocked(self) -> None:
+        result = _evaluate(requires_foundry=True, active_foundry_env_count=2)
+        self.assertIs(result.decision, preflight.Decision.BLOCKED)
+        self.assertEqual(result.reason_code, "foundry_concurrency_cap")
+
+    def test_bool_app_count_fails_closed(self) -> None:
+        # A bool is not a valid count; it must fail closed rather than be
+        # treated as 0/1 via int coercion.
+        result = _evaluate(active_app_env_count=True)
+        self.assertIs(result.decision, preflight.Decision.BLOCKED)
+        self.assertEqual(result.reason_code, "app_concurrency_cap")
 
 
 if __name__ == "__main__":
