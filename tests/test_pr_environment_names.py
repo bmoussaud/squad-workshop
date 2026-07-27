@@ -145,6 +145,33 @@ class ContainerAppInvariantTests(unittest.TestCase):
         self.assertTrue(name.startswith("ca-fc-pr987654-"))
         self.assertTrue(name.endswith(digest))
 
+    def test_starts_with_letter_and_ends_alphanumeric(self) -> None:
+        for pr, slug in ((14, "render-card-layout"), (5, "x"), (99, "a-b-c-d")):
+            digest = naming.hash8(REPO, pr, slug)
+            name = naming.container_app_name(pr, slug, digest)
+            self.assertTrue(name[0].isalpha() and name[0].islower(), name)
+            self.assertTrue(name[-1].isalnum(), name)
+            self.assertFalse(name.endswith("-"), name)
+            self.assertGreaterEqual(len(name), naming.CONTAINER_APP_MIN, name)
+            self.assertRegex(name, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+
+    def test_degenerate_single_char_slug_produces_valid_name(self) -> None:
+        # slug -> single-char compact token: must not yield a trailing hyphen or
+        # a hyphen-adjacent truncation artifact.
+        names = naming.compute_names(REPO, 5, "squad/5-x")
+        name = names.container_app
+        self.assertEqual(name, f"ca-fc-pr5-x-{names.hash8}")
+        self.assertRegex(name, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+
+    def test_pathological_long_slug_never_ends_with_hyphen(self) -> None:
+        # Force truncation of slug_compact against a large PR token so the tail
+        # of the acronym is trimmed; the name must still end at hash8, not '-'.
+        slug = "-".join(f"seg{i}" for i in range(30))
+        digest = naming.hash8(REPO, 999999, slug)
+        name = naming.container_app_name(999999, slug, digest)
+        self.assertFalse(name.endswith("-"), name)
+        self.assertRegex(name, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+
 
 class AcrReferenceValidationTests(unittest.TestCase):
     def test_valid_names(self) -> None:
@@ -189,6 +216,8 @@ class PropertySweepTests(unittest.TestCase):
                 st = names.storage_account
                 self.assertTrue(3 <= len(st) <= 24 and st.isalnum() and st.islower(), st)
                 self.assertLessEqual(len(names.container_app), 32, names.container_app)
+                self.assertRegex(names.container_app, r"^[a-z][a-z0-9-]*[a-z0-9]$")
+                self.assertGreaterEqual(len(names.container_app), 2, names.container_app)
                 self.assertLessEqual(
                     len(names.managed_environment), 32, names.managed_environment
                 )

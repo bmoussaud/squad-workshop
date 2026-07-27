@@ -28,7 +28,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from pr_environment_names import (  # noqa: E402
+    CONTAINER_APP_MAX,
+    CONTAINER_APP_MIN,
+    MANAGED_ENVIRONMENT_DEFENSIVE_MAX,
     PrEnvironmentNames,
+    _CONTAINER_APP_RE,
     is_valid_acr_name,
 )
 
@@ -168,12 +172,16 @@ def _invalid_service_name(
         ),
         (
             "container_app",
-            1 <= len(names.container_app) <= 32,
+            CONTAINER_APP_MIN <= len(names.container_app) <= CONTAINER_APP_MAX
+            and _CONTAINER_APP_RE.match(names.container_app) is not None,
             names.container_app,
         ),
         (
+            # Defensive self-check only: the managed-environment max length is
+            # UNVERIFIED (undocumented by Azure). We confirm our own defensive
+            # compaction ceiling held, not an authoritative Azure limit.
             "managed_environment",
-            1 <= len(names.managed_environment) <= 32,
+            1 <= len(names.managed_environment) <= MANAGED_ENVIRONMENT_DEFENSIVE_MAX,
             names.managed_environment,
         ),
         (

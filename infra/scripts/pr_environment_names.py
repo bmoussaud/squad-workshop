@@ -15,6 +15,21 @@ branch): the ``azd`` environment name is ``pr-{number}-{slug}-{hash8}`` where
 * ``hash8`` is the first 8 lowercase hex chars of
   ``sha256("{repo}|{prNumber}|{slug}")``.
 
+API CONTRACT for ``hash8``: ``repo`` MUST be the canonical GitHub
+``owner/repo`` form (e.g. ``bmoussaud/squad-workshop``). The design doc left
+this ambiguous, which is precisely why five different candidate hashes exist for
+PR #14; this module pins the ``owner/repo`` form so the output is deterministic.
+
+KNOWN DISCREPANCY: the design doc's worked example claims
+``hash8 == "4717e5bb"`` for PR #14, but that value is NOT reproducible from the
+doc's own stated rule under ANY plausible ``repo`` reading (verified: owner/repo
+-> ``4c32c628``, bare name -> ``fff13584``, full URL -> ``2ccebd61``, host/path
+-> ``bc96ea57``, branch-as-repo -> ``c9ca5700``). This module implements the
+rule AS SPECIFIED; ``4c32c628`` is the correct output for the canonical
+``owner/repo`` input. A human must adjudicate whether the doc gets corrected.
+The doc's other two example values (storage 16 chars, container app 23 chars)
+are internally consistent shapes -- only the hash substring is wrong.
+
 Every generator fails loudly (``ValueError``) rather than silently emitting a
 name that violates an Azure limit.
 """
@@ -29,10 +44,14 @@ import sys
 from dataclasses import asdict, dataclass
 
 # --- Azure service hard limits -------------------------------------------------
+# The values below are the AUTHORITATIVE, doc-cited limits (learn.microsoft.com
+# resource-name-rules) unless annotated otherwise.
 STORAGE_MAX = 24
 STORAGE_MIN = 3
+# Container Apps: length 2-32, lowercase alphanumeric and hyphens, must START
+# with a letter and END with an alphanumeric character.
 CONTAINER_APP_MAX = 32
-MANAGED_ENVIRONMENT_MAX = 32
+CONTAINER_APP_MIN = 2
 RESOURCE_GROUP_MAX = 90
 MANAGED_IDENTITY_MAX = 128
 APPLICATION_INSIGHTS_MAX = 260
@@ -40,6 +59,13 @@ ACTION_GROUP_MAX = 260
 BUDGET_MAX = 63
 ACR_MIN = 5
 ACR_MAX = 50
+# UNVERIFIED: the Container Apps *managed environment* max length is NOT
+# published (the ARM reference gives only the character pattern, no length), and
+# ``azd`` publishes no documented length limit on environment names either. We
+# do NOT assert an authoritative Azure limit for these; instead we apply the
+# same defensive compaction fallback we use elsewhere, using this conservative
+# self-imposed ceiling so a pathological name can never silently balloon.
+MANAGED_ENVIRONMENT_DEFENSIVE_MAX = 32
 
 # Compact fixed application prefix used inside per-resource names.
 APP_PREFIX = "fc"
@@ -48,6 +74,9 @@ _BRANCH_RE = re.compile(r"^squad/(?P<issue>[1-9][0-9]*)-(?P<slug>.+)$")
 _SLUG_ALLOWED_RE = re.compile(r"[^a-z0-9-]+")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
 _ACR_RE = re.compile(r"^[a-zA-Z0-9]+$")
+# Container App: start with a letter, end with an alphanumeric, lowercase
+# alphanumeric and hyphens in between.
+_CONTAINER_APP_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
 
 
 def slug_from_branch(branch: str) -> str:
@@ -85,7 +114,11 @@ def hash8(repo: str, pr_number: int, slug: str) -> str:
     """First 8 lowercase hex chars of ``sha256("{repo}|{prNumber}|{slug}")``.
 
     The exact hashed input format is ``repo|prNumber|slug`` with a single ASCII
-    pipe separator and no surrounding whitespace.
+    pipe separator and no surrounding whitespace. ``repo`` MUST be the canonical
+    GitHub ``owner/repo`` form (e.g. ``bmoussaud/squad-workshop``); this is a
+    documented part of the contract because the design doc's ambiguity about the
+    repo form produced five different candidate hashes. Callers must not pass a
+    bare repo name, a URL, or a host/path form.
     """
     if not isinstance(repo, str) or not repo:
         raise ValueError("repo must be a non-empty string")
@@ -139,11 +172,15 @@ def _slug_words(slug: str) -> list[str]:
 
 
 def container_app_name(pr_number: int, slug: str, digest: str) -> str:
-    """``ca-fc-pr{number}-{slugCompact}-{hash8}`` -- length <=32.
+    """``ca-fc-pr{number}-{slugCompact}-{hash8}`` -- length 2-32.
 
     ``slugCompact`` is the acronym formed from the first character of each slug
     word, taken left to right only as far as the full name stays within 32
     chars. Long slugs are therefore compacted (never overflowing the limit).
+
+    Enforces the full Container Apps naming rule: length 2-32, lowercase
+    alphanumeric and hyphens only, MUST start with a letter and end with an
+    alphanumeric character (so no trailing-hyphen or empty-token artifact).
     """
     _validate_pr_number(pr_number)
     prefix = f"ca-{APP_PREFIX}-pr{pr_number}-"
@@ -159,9 +196,23 @@ def container_app_name(pr_number: int, slug: str, digest: str) -> str:
         raise ValueError(f"slug {slug!r} produced an empty acronym")
     slug_compact = acronym[:budget]
     name = f"{prefix}{slug_compact}{suffix}"
-    if len(name) > CONTAINER_APP_MAX:
-        raise ValueError(f"generated container app name {name!r} exceeds 32 chars")
+    _validate_container_app_name(name)
     return name
+
+
+def _validate_container_app_name(name: str) -> None:
+    """Fail loudly unless ``name`` satisfies every Container Apps naming rule."""
+    if not (CONTAINER_APP_MIN <= len(name) <= CONTAINER_APP_MAX):
+        raise ValueError(
+            f"generated container app name {name!r} violates length "
+            f"{CONTAINER_APP_MIN}-{CONTAINER_APP_MAX}"
+        )
+    if _CONTAINER_APP_RE.match(name) is None:
+        raise ValueError(
+            f"generated container app name {name!r} must be lowercase "
+            "alphanumeric/hyphen, start with a letter and end with an "
+            "alphanumeric character"
+        )
 
 
 def _compact_or_full(full: str, limit: int, pr_number: int, digest: str) -> str:
@@ -236,7 +287,7 @@ def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
         storage_account=storage_account_name(pr_number, digest),
         container_app=container_app_name(pr_number, slug, digest),
         managed_environment=_compact_or_full(
-            env, MANAGED_ENVIRONMENT_MAX, pr_number, digest
+            env, MANAGED_ENVIRONMENT_DEFENSIVE_MAX, pr_number, digest
         ),
         managed_identity=_compact_or_full(
             env, MANAGED_IDENTITY_MAX, pr_number, digest
