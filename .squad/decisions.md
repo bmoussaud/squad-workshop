@@ -116,6 +116,29 @@
 **What:** Provider-backed generation now requests a portrait 1024x1536 fantasy trading-card layout through `build_card_prompt(title, description)`: ornate frame, top title banner, central art, and bottom stats/description area. The `ImageGenerator` port contract is `generate(title, prompt)`.
 **Why:** Issue #11 requires generated images to look like fantasy trading cards rather than square subject illustrations, and the explicit prompt/port contract keeps providers, tests, and adapters aligned.
 
+### 2026-07-27T14:24:13+02:00: PR-environment Phase 1 deterministic naming contract (#16) (consolidated)
+**By:** Tank, Fact Checker, Switch, Morpheus
+**What:** The authoritative Phase 1 CI/platform naming contract lives in `infra/scripts/`: `pr-{number}-{slug}-{hash8}`, where `hash8` is the first eight hexadecimal characters of SHA-256 over the pinned canonical input `owner/repo|prNumber|slug`. `compute_names()` produces Azure-safe derived names and the preflight stays pure with concurrency counts supplied as inputs. Container App names are enforced as 2–32 lowercase alphanumeric-or-hyphen characters that start with a letter and end with an alphanumeric character; this closes a design-doc omission. Switch approved the implementation and added seven boundary/regression tests.
+
+**Why:** Placement matches the repository's CI/platform-tooling convention and makes naming deterministic, testable, and fail-loud before Azure provisioning. The design document's worked example on `bmoussaud-glowing-broccoli` is not reproducible: canonical `bmoussaud/squad-workshop|14|render-card-layout` yields `4c32c628`, not `4717e5bb`. The branch owner must correct the document and its derived examples before that branch merges; code must retain the stated algorithm rather than conform to the erroneous example.
+
+### 2026-07-27T14:24:13+02:00: PR-environment Bicep naming seam assigned to Phase 3 (#15)
+**By:** Morpheus
+**What:** For PR environments, `infra/web.bicep` must consume precomputed `containerAppName`, `storageAccountName`, and `containerAppsEnvironmentName` parameters supplied by the Phase 3 workflow. It must not reconstruct names from `environmentName` or `resourceToken`. Phase 2 left these names unconsumed; its `ca-fantasy-cards-${environmentName}` construction reaches 50 characters for the PR #14 example and exceeds the 32-character Container App limit. Teardown/janitor work must key on immutable `pr-number` tags rather than a slug-derived name to tolerate branch renames.
+
+**Why:** Tank's names are correct but currently unused by Bicep. Parameterizing the Phase 1-to-Phase 3 seam fixes the deploy-time overflow without reopening merged Phase 2 work, and immutable tags prevent branch-renaming orphan risks.
+
+### 2026-07-27T14:24:13+02:00: PR preflight credential and Foundry safety gates (#16) (consolidated)
+**By:** Rai, Morpheus
+**What:** The credential trust boundary accepts only strict booleans and fails closed: malformed `is_fork` or `is_draft` values and missing/non-empty-invalid repository signals block before any later draft or cap check. Foundry use requires explicit strict-boolean `requires_foundry` and an explicit approved `foundry_authorized` signal; authorization never waives the maximum one Foundry environment cap. Printable CLI output excludes raw repository input and sanitizes control characters from error output.
+
+**Why:** A falsey-but-ambiguous GitHub Actions signal must never allow a fork to reach Azure credentials. Foundry incurs privileged/cost-sensitive provisioning and needs both authorization and the independent capacity limit. PR-controlled branches and repositories are log-injection inputs, so logs must not echo them unsafely.
+
+### 2026-07-27T14:24:13+02:00: Reviewer rejection protocol completed for #16 preflight
+**By:** Rai, Morpheus
+**What:** Rai issued a 🔴 RED review for the trust-boundary, Foundry-gate, and output-safety defects. Tank was then locked out of revision, and Morpheus produced the independent remediation. Rai empirically re-reviewed it 🟢 GREEN; the final suite passed 148 tests.
+
+**Why:** The rejected preflight controls Azure credential access. The independent-author lockout and final reviewer re-approval ensure the remediation was not self-certified by the rejected implementation author.
 ## Governance
 
 - All meaningful changes require team consensus

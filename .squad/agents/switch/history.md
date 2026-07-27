@@ -32,3 +32,7 @@
 📌 Team update (2026-07-23T14:02:52+0000): Generation completion uses a safe structured INFO contract at the web boundary, with acceptance coverage for successful and provider-failed event metadata and no sensitive request or dependency values. — decided by Trinity, Switch
 
 📌 Team update (2026-07-27T08:47:25.103+02:00): Independent review of the card-contract tests remains an open follow-up on PR #13 — decided by Benoit (via Squad Coordinator).
+
+2026-07-27T14:24:13+02:00 — Reviewed Tank's PR-envs Phase 1 (#16, commits dfdee7e/e8f7688). Verdict: APPROVE WITH FINDINGS. Ran CI gates myself: full suite 120 OK via `uv run python -m unittest discover`, targeted module 46 OK, compileall/lock-check/egg-info/diff --check all clean. Adversarial probes (path traversal, unicode, storage no-hyphen sweep, container-app start/end rules, GITHUB_OUTPUT safety, preflight fail-closed caps) all held. Hash discrepancy handled honestly (doc example 4717e5bb not reproducible; code pins owner/repo -> 4c32c628 and flags for human). Added 7 regression tests in commit 2513c58; did not touch the implementation. Open human item: correct the design doc worked example.
+
+📌 Team update (2026-07-27T14:24:13+02:00): Cross-agent outcome for #16: Rai’s RED review triggered Tank lockout; Morpheus independently fixed strict trust booleans, Foundry authorization-plus-cap, and log safety; Rai re-reviewed GREEN with 148 tests. `web.bicep` still does not consume the tested names; Phase 3/#15 owns that seam.
