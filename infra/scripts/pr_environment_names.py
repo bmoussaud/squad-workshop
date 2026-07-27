@@ -41,7 +41,7 @@ import hashlib
 import json
 import re
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 # --- Azure service hard limits -------------------------------------------------
 # The values below are the AUTHORITATIVE, doc-cited limits (learn.microsoft.com
@@ -77,6 +77,23 @@ _ACR_RE = re.compile(r"^[a-zA-Z0-9]+$")
 # Container App: start with a letter, end with an alphanumeric, lowercase
 # alphanumeric and hyphens in between.
 _CONTAINER_APP_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$")
+# Any control character (newlines, carriage returns, ANSI ESC, NUL, DEL). These
+# are the log-injection primitives: a real newline lets attacker-controlled
+# input open a fresh log line that could start a GitHub Actions workflow command
+# (``::error``, ``::set-output``) or corrupt a multi-line ``$GITHUB_OUTPUT``
+# value. Every string this module PRINTS is passed through ``_sanitize_log``.
+_LOG_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_log(text: str) -> str:
+    """Neutralize any control character so printed text can never inject a new
+    log line or a GitHub Actions workflow command.
+
+    Branch names are fully attacker-controlled on fork PRs, so any value that
+    could be echoed (including inside an error message) is collapsed to a single
+    safe line before it reaches stdout/stderr.
+    """
+    return _LOG_UNSAFE_RE.sub(" ", text)
 
 
 def slug_from_branch(branch: str) -> str:
@@ -249,7 +266,10 @@ def is_valid_acr_name(name: str) -> bool:
 class PrEnvironmentNames:
     """The full set of deterministic names for one per-PR environment."""
 
-    repo: str
+    # ``repo`` is part of the in-process identity record but is kept out of the
+    # dataclass repr and out of every printable projection: it is not a
+    # generated Azure name and must never be echoed into CI logs or PR comments.
+    repo: str = field(repr=False)
     pr_number: int
     slug: str
     hash8: str
@@ -264,7 +284,34 @@ class PrEnvironmentNames:
     budget: str
 
     def as_dict(self) -> dict[str, object]:
+        """Full record for in-process callers (includes ``repo``).
+
+        This is NOT the log/CI surface -- use :meth:`printable_fields` for
+        anything that gets printed. Callers that build resource tags read
+        ``repo`` directly from this record; they must never print it verbatim.
+        """
         return asdict(self)
+
+    def printable_fields(self) -> dict[str, str]:
+        """The log-safe projection emitted by the CLI (no ``repo``).
+
+        Only generated Azure names appear here, every one of which is
+        constrained to ``[a-z0-9-]`` (plus fixed prefixes), so no value can carry
+        a newline, ANSI escape, or workflow-command marker.
+        """
+        return {
+            "environment_name": self.environment_name,
+            "slug": self.slug,
+            "hash8": self.hash8,
+            "resource_group": self.resource_group,
+            "storage_account": self.storage_account,
+            "container_app": self.container_app,
+            "managed_environment": self.managed_environment,
+            "managed_identity": self.managed_identity,
+            "application_insights": self.application_insights,
+            "action_group": self.action_group,
+            "budget": self.budget,
+        }
 
 
 def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
@@ -325,20 +372,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _render_env(names: PrEnvironmentNames) -> str:
-    fields = {
-        "environment_name": names.environment_name,
-        "slug": names.slug,
-        "hash8": names.hash8,
-        "resource_group": names.resource_group,
-        "storage_account": names.storage_account,
-        "container_app": names.container_app,
-        "managed_environment": names.managed_environment,
-        "managed_identity": names.managed_identity,
-        "application_insights": names.application_insights,
-        "action_group": names.action_group,
-        "budget": names.budget,
-    }
-    return "\n".join(f"{key}={value}" for key, value in fields.items())
+    return "\n".join(
+        f"{key}={value}" for key, value in names.printable_fields().items()
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -346,10 +382,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         names = compute_names(args.repo, args.pr_number, args.branch)
     except ValueError as error:
-        print(f"pr_environment_names: {error}", file=sys.stderr)
+        # The branch is attacker-controlled input; sanitize before printing so a
+        # crafted branch name cannot inject a log line or workflow command.
+        print(f"pr_environment_names: {_sanitize_log(str(error))}", file=sys.stderr)
         return 1
     if args.format == "json":
-        print(json.dumps(names.as_dict(), sort_keys=True))
+        print(json.dumps(names.printable_fields(), sort_keys=True))
     else:
         print(_render_env(names))
     return 0

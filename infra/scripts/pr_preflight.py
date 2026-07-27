@@ -62,6 +62,21 @@ def _blocked(reason_code: str, message: str) -> PreflightResult:
     return PreflightResult(Decision.BLOCKED, reason_code, message)
 
 
+def _is_bool(value: object) -> bool:
+    """True only for a real ``bool``.
+
+    This is the trust-boundary guard: it never treats ``None``, ``0``, ``""`` or
+    any other value as a boolean. Truthiness coercion is exactly the fail-open
+    defect this replaces, so a missing or malformed signal is rejected rather
+    than silently interpreted.
+    """
+    return value is True or value is False
+
+
+def _is_nonempty_str(value: object) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
 def _non_negative_count(value: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -75,36 +90,66 @@ def evaluate(
     names: PrEnvironmentNames,
     referenced_acr_name: str,
     active_app_env_count: int,
-    requires_foundry: bool = False,
+    requires_foundry: bool,
+    foundry_authorized: bool = False,
     active_foundry_env_count: int = 0,
 ) -> PreflightResult:
-    """Run the six Phase-1 preflight checks and return a single decision.
+    """Run the Phase-1 preflight checks and return a single decision.
 
     Checks are ordered so the strongest security gates run first and any
     ambiguity fails closed:
 
-    1. Fork PRs -> BLOCKED (no credentials, build/test only).
-    2. Head repo must equal base repo (same-repo trust) -> BLOCKED otherwise.
-    3. Draft PRs -> SKIP (not an error; deploy once ready for review).
-    4. Every generated service name must satisfy its Azure limit -> BLOCKED.
+    0. Trust-signal integrity: ``is_fork`` MUST be an explicit boolean;
+       ``None``/``0``/``""``/non-bool -> BLOCKED (never coerced).
+    1. Fork PRs -> BLOCKED, evaluated FIRST and unconditionally (no credentials).
+    2. Head repo must equal base repo, both explicit non-empty strings ->
+       BLOCKED otherwise.
+    3. Draft signal must be an explicit boolean; draft PRs -> SKIP (not an error).
+    4. Every generated service name must satisfy its Azure limit -> BLOCKED
+       (opaque field name only; raw values are never echoed).
     5. App-tier concurrency cap (max 3 active) -> BLOCKED when at/over cap.
-    6. Foundry exception cap (max 1 active) -> BLOCKED when at/over cap.
+    6. Foundry exception: ``requires_foundry`` is a required strict boolean so it
+       cannot be silently omitted to skip the control. When set, the Foundry path
+       additionally REQUIRES an explicit approved ``foundry_authorized`` signal
+       (absent/unapproved/unknown fails closed) AND stays under the cap (max 1).
     """
-    # 1. Fork PRs never receive credentials -- hard security block.
+    # 0. Trust-signal integrity for the fork flag -- it decides credential
+    #    exposure, so an unrendered/empty/mistyped signal must fail closed.
+    if not _is_bool(is_fork):
+        return _blocked(
+            "invalid_trust_signal",
+            "Fork trust signal is missing or not an explicit boolean; failing closed.",
+        )
+
+    # 1. Fork PRs never receive credentials -- hard security block, evaluated
+    #    first so no later check can short-circuit it.
     if is_fork:
         return _blocked(
             "fork_pr",
             "Fork pull requests receive no Azure credentials; build and test only.",
         )
 
-    # 2. Same-repo trust (defense in depth even when is_fork is False).
-    if not base_repo or not head_repo or head_repo != base_repo:
+    # 2. Same-repo trust. Both identifiers must be explicit non-empty strings; a
+    #    blank/absent value (e.g. an unrendered Actions context field) fails
+    #    closed rather than being treated as trusted.
+    if not _is_nonempty_str(base_repo) or not _is_nonempty_str(head_repo):
+        return _blocked(
+            "untrusted_repo",
+            "Repository trust signal is missing or malformed; refusing to deploy.",
+        )
+    if head_repo != base_repo:
         return _blocked(
             "untrusted_repo",
             "Head repository does not match the base repository; refusing to deploy.",
         )
 
-    # 3. Draft PRs are skipped -- deliberate, not an error.
+    # 3. Draft integrity + skip. A malformed draft signal fails closed; a genuine
+    #    draft is a deliberate SKIP, not an error.
+    if not _is_bool(is_draft):
+        return _blocked(
+            "invalid_trust_signal",
+            "Draft signal is not an explicit boolean; failing closed.",
+        )
     if is_draft:
         return PreflightResult(
             Decision.SKIP,
@@ -112,14 +157,15 @@ def evaluate(
             "Draft pull request; skipping ephemeral deployment until ready for review.",
         )
 
-    # 4. Service-name limit validation (fail closed on any bad name).
+    # 4. Service-name limit validation. Emit only the opaque field name -- never
+    #    the raw generated value, which lands in world-readable CI logs.
     invalid = _invalid_service_name(names, referenced_acr_name)
     if invalid is not None:
-        field, value = invalid
+        field, _value = invalid
         return _blocked(
             "invalid_service_name",
-            f"Generated name for {field} is invalid for its Azure service limit: "
-            f"{value!r}.",
+            f"Generated name for field {field!r} violates its Azure service "
+            "limit; failing closed.",
         )
 
     # 5. App-tier concurrency cap.
@@ -135,8 +181,24 @@ def evaluate(
             f"({active_app_env_count}/{APP_TIER_CONCURRENCY_CAP}); failing closed.",
         )
 
-    # 6. Foundry exception cap (only when the PR requires Foundry provisioning).
+    # 6. Foundry exception. ``requires_foundry`` is mandatory and strictly typed
+    #    so it cannot be omitted to bypass the cap. The Foundry path is
+    #    cost/RBAC/safety-bearing, so it requires an explicit approved
+    #    authorization signal AND must stay under the exception cap; anything
+    #    ambiguous fails closed.
+    if not _is_bool(requires_foundry):
+        return _blocked(
+            "invalid_trust_signal",
+            "Foundry requirement signal is not an explicit boolean; failing closed.",
+        )
     if requires_foundry:
+        if not _is_bool(foundry_authorized) or not foundry_authorized:
+            return _blocked(
+                "foundry_unauthorized",
+                "Foundry-per-PR requires explicit approval via the Foundry "
+                "provisioning gate; authorization is absent or unapproved. "
+                "Failing closed.",
+            )
         if not _non_negative_count(active_foundry_env_count):
             return _blocked(
                 "foundry_concurrency_cap",
