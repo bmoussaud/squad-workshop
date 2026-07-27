@@ -106,13 +106,34 @@ jobs:
           #    nothing soft-deleted to purge, and `az group delete` is
           #    functionally equivalent to `azd down --purge` for this stack.
           #
-          # PR_NUMBER is a validated integer read from env, never interpolated
-          # into the --query string from github.event.
+          # PR_NUMBER is safe by PROVENANCE (GitHub emits
+          # github.event.pull_request.number as an integer, not attacker-
+          # controllable), but we still VALIDATE it here so this file's safety
+          # does not depend on a reader knowing GitHub's payload schema: reject
+          # anything that is not a run of digits before it reaches --query.
+          if ! printf '%s' "${PR_NUMBER}" | grep -Eq '^[0-9]+$'; then
+            echo "::error::PR_NUMBER is not a non-negative integer: '${PR_NUMBER}'"
+            exit 1
+          fi
+
+          # Distinguish "the query FAILED" (expired creds, throttling, transient
+          # API error) from "the query SUCCEEDED and returned nothing". Without
+          # this, a failed `az group list` under `set +e` leaves matches empty
+          # and the idempotency branch below would falsely report a no-op success,
+          # leaking the resource group. Capture the exit status explicitly and
+          # fail the step loudly on a genuine query failure.
+          matches=""
+          query_rc=0
           matches="$(az group list \
             --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app' && tags.\"pr-number\"=='${PR_NUMBER}'].name" \
-            -o tsv)"
+            -o tsv)" || query_rc=$?
+          if [ "${query_rc}" -ne 0 ]; then
+            echo "::error::az group list failed (exit ${query_rc}); cannot determine teardown target. Failing loudly rather than reporting a false no-op."
+            exit 1
+          fi
 
-          # IDEMPOTENCY: an empty match set is the expected no-op, NOT a failure.
+          # IDEMPOTENCY: an empty match set (query SUCCEEDED, returned nothing) is
+          # the expected no-op, NOT a failure.
           # It covers every "nothing to tear down" case: the PR never deployed
           # (draft / fork / preflight-blocked), the group was already deleted, or
           # a previous teardown completed. Exit 0.
