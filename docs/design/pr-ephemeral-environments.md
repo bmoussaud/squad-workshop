@@ -129,6 +129,24 @@ The current Bicep/azd contract should be parameterized rather than forked:
 - Preserve the existing AVM-first, `targetScope = 'resourceGroup'`, and native-fallback documentation rules from [Azure Deployment Design](azure-deployment.md).
 - Ensure `azd provision` can create/update app-tier resources without touching shared Foundry unless `deployFoundry=true`.
 
+### Name parameterization contract (Phase 3 work item A, #15)
+
+`infra/web.bicep` no longer constructs its overflow-prone resource names from `environmentName`/`resourceToken`. The names are now `web.bicep`/`main.bicep` parameters, threaded from `main.bicepparam` via `readEnvironmentVariable`. Each parameter defaults to `''`; when empty the template reproduces the exact pre-existing dev-derived value, so the `dev` environment is unchanged. PR environments export the environment variables below (produced by `infra/scripts/pr_environment_names.py`) so the Azure-limit-safe names reach Bicep.
+
+The authoritative CLI→env-var mapping is `BICEPPARAM_ENV_VARS` in `infra/scripts/pr_environment_names.py`. `pr_environment_names.py --format envvars` emits exactly these `NAME=value` lines, ready to append to `$GITHUB_ENV`:
+
+| naming-module key | env var (read by `main.bicepparam`) | Bicep param | dev fallback when unset |
+| --- | --- | --- | --- |
+| `environment_name` | `AZURE_ENV_NAME` | `environmentName` | — (required) |
+| `container_app` | `CONTAINER_APP_NAME` | `containerAppName` | `ca-fantasy-cards-${environmentName}` |
+| `managed_environment` | `CONTAINER_APPS_ENVIRONMENT_NAME` | `containerAppsEnvironmentName` | `cae-fantasy-cards-${environmentName}` |
+| `storage_account` | `STORAGE_ACCOUNT_NAME` | `storageAccountName` | `stfc${resourceToken}` |
+| `virtual_network` | `VIRTUAL_NETWORK_NAME` | `virtualNetworkName` (private VNet) | `vnet-fantasy-cards-${environmentName}-private` |
+| `application_insights` | `APPLICATION_INSIGHTS_NAME` | `applicationInsightsName` | `appi-fantasy-cards-dev-8f327f8c` |
+
+Why the private VNet is included: `vnet-fantasy-cards-${environmentName}-private` reaches 65 chars for a real PR (`pr-26-relax-ci-ownership-gate-8ba70a79`), one over the 64-char VNet limit, so the naming module now emits a bounded `virtual_network` name anchored to the compacted `managed_environment` token. The other private names need no new parameter: `privateContainerAppName` derives from the 13-char `resourceToken` (always ≤32), and `privateContainerAppsEnvironmentName`/`privateEndpointName` derive from the now-parameterized (already bounded) `containerAppsEnvironmentName`/`storageAccountName`. Identity parameters (`PLATFORM_IDENTITY_NAME`/`APPLICATION_IDENTITY_NAME`) are intentionally out of this contract — a single `managed_identity` token does not map onto the two identities — and are left to the workflow (work item B).
+
+
 ## Cost & lifecycle
 
 Every app-tier PR resource group carries:

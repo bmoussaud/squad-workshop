@@ -95,6 +95,18 @@ param alertContactEmails array
 @description('Enable application-signal log alerts only after Azure Validate confirms telemetry tables and queries.')
 param enableApplicationSignalAlerts bool = false
 
+@description('Precomputed Container App resource name (Phase 1 naming module, CONTAINER_APP_NAME). Empty keeps the dev-derived name; PR environments supply an Azure-limit-safe name.')
+param containerAppName string = ''
+
+@description('Precomputed Container Apps managed environment name (Phase 1 naming module, CONTAINER_APPS_ENVIRONMENT_NAME). Empty keeps the dev-derived name.')
+param containerAppsEnvironmentName string = ''
+
+@description('Precomputed Storage account name (Phase 1 naming module, STORAGE_ACCOUNT_NAME). Empty keeps the dev-derived name.')
+param storageAccountName string = ''
+
+@description('Precomputed private app-tier VNet name (Phase 1 naming module, VIRTUAL_NETWORK_NAME). Empty keeps the dev-derived name.')
+param virtualNetworkName string = ''
+
 var tags = {
   environment: environmentName
   workload: 'fantasy-cards'
@@ -130,6 +142,10 @@ module web 'web.bicep' = {
     location: applicationLocation
     tags: tags
     environmentName: environmentName
+    containerAppName: containerAppName
+    containerAppsEnvironmentName: containerAppsEnvironmentName
+    storageAccountName: storageAccountName
+    virtualNetworkName: virtualNetworkName
     deployAcr: deployAcr
     sharedContainerRegistryName: sharedContainerRegistryName
     sharedContainerRegistryResourceGroupName: sharedContainerRegistryResourceGroupName

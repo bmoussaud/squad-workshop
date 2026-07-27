@@ -18,7 +18,9 @@ endpoints, prompts, or signed URLs).
 
 from __future__ import annotations
 
+import argparse
 import enum
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +35,8 @@ from pr_environment_names import (  # noqa: E402
     MANAGED_ENVIRONMENT_DEFENSIVE_MAX,
     PrEnvironmentNames,
     _CONTAINER_APP_RE,
+    _sanitize_log,
+    compute_names,
     is_valid_acr_name,
 )
 
@@ -261,3 +265,167 @@ def _invalid_service_name(
         if not ok:
             return field, value
     return None
+
+
+# --- CLI ----------------------------------------------------------------------
+# The workflow (Phase 3 work item B) consumes this verdict instead of
+# re-implementing the fork / draft / same-repo checks inline in YAML, where a
+# naive truthiness read of ``github.event.pull_request.head.repo.fork`` would
+# reintroduce the fail-open defect this module was written to close. Exit codes:
+# 0 = PROCEED or SKIP (neither is an error); non-zero = BLOCKED. The ``decision``
+# key in the output is authoritative for downstream job gating; a BLOCKED
+# decision fails the run. Every printed field is already CI-safe (constrained
+# names, fixed reason codes, self-sanitizing messages) and never echoes ``repo``.
+
+# Exit code returned for a BLOCKED verdict. Distinct from a usage error (2, from
+# argparse) so a caller can tell "refused by policy" from "called wrong".
+BLOCKED_EXIT_CODE = 3
+
+
+def _parse_tristate_bool(raw: str) -> object:
+    """Map a CLI string to ``True`` / ``False`` / a fail-closed sentinel.
+
+    GitHub Actions renders ``github.event.*`` booleans as the literal strings
+    ``true`` / ``false`` (or an empty string when the field is missing). Anything
+    that is not exactly ``true`` or ``false`` (case-insensitively) is returned as
+    ``None`` so :func:`evaluate` treats it as a malformed trust signal and fails
+    closed -- the strict-boolean contract is preserved end to end rather than
+    coerced by truthiness in YAML.
+    """
+    normalized = raw.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
+def _parse_count(raw: str) -> int:
+    """Parse a non-negative integer count, or ``-1`` when it is unknowable.
+
+    An empty or non-numeric count (e.g. an Azure query that returned nothing
+    usable) becomes ``-1`` so :func:`evaluate` fails closed on the concurrency
+    cap rather than silently treating an unknown count as zero.
+    """
+    stripped = raw.strip()
+    # ``str.isdigit()`` is True for many non-ASCII code points (e.g. Arabic-Indic
+    # or superscript digits); some of those then raise in ``int()`` (superscript
+    # two) while others parse to a surprising value (Arabic-Indic five -> 5).
+    # Restrict to ASCII digits so an exotic/malformed count fails closed to -1
+    # instead of crashing or being silently accepted.
+    if stripped.isascii() and stripped.isdigit():
+        return int(stripped)
+    return -1
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="pr_preflight",
+        description=(
+            "Evaluate the per-PR ephemeral-environment safety preflight and emit "
+            "a single tri-state verdict (proceed / skip / blocked). Fails closed "
+            "on any malformed trust signal. Exits non-zero on BLOCKED."
+        ),
+    )
+    parser.add_argument("--repo", required=True, help="base owner/name repository slug")
+    parser.add_argument("--pr-number", required=True, type=int, help="GitHub PR number")
+    parser.add_argument(
+        "--branch", required=True, help="PR head branch (squad/{issue}-{slug})"
+    )
+    parser.add_argument(
+        "--is-fork",
+        required=True,
+        help="'true'/'false' from github.event.pull_request.head.repo.fork",
+    )
+    parser.add_argument(
+        "--is-draft",
+        required=True,
+        help="'true'/'false' from github.event.pull_request.draft",
+    )
+    parser.add_argument("--base-repo", required=True, help="github.repository")
+    parser.add_argument(
+        "--head-repo",
+        required=True,
+        help="github.event.pull_request.head.repo.full_name",
+    )
+    parser.add_argument(
+        "--referenced-acr-name",
+        required=True,
+        help="name of the shared Azure Container Registry the PR app pulls from",
+    )
+    parser.add_argument(
+        "--active-app-env-count",
+        default="",
+        help="count of active app-tier PR environments (non-numeric fails closed)",
+    )
+    parser.add_argument(
+        "--requires-foundry",
+        default="false",
+        help="'true'/'false': does this PR require the gated Foundry exception",
+    )
+    parser.add_argument(
+        "--foundry-authorized",
+        default="false",
+        help="'true'/'false': Foundry provisioning gate approval signal",
+    )
+    parser.add_argument(
+        "--active-foundry-env-count",
+        default="0",
+        help="count of active Foundry PR environments (non-numeric fails closed)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("env", "json"),
+        default="env",
+        help="output format: env (key=value lines) or json",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+
+    # Compute names first. A branch that does not follow the convention (or any
+    # other invalid input) is a hard, fail-closed BLOCKED -- not a crash -- and
+    # the branch is attacker-controlled, so sanitize before printing.
+    try:
+        names = compute_names(args.repo, args.pr_number, args.branch)
+    except ValueError as error:
+        result = _blocked(
+            "invalid_names",
+            "Could not compute deterministic environment names; failing closed: "
+            f"{_sanitize_log(str(error))}",
+        )
+        _emit(result, args.format)
+        return BLOCKED_EXIT_CODE
+
+    result = evaluate(
+        is_fork=_parse_tristate_bool(args.is_fork),
+        is_draft=_parse_tristate_bool(args.is_draft),
+        base_repo=args.base_repo,
+        head_repo=args.head_repo,
+        names=names,
+        referenced_acr_name=args.referenced_acr_name,
+        active_app_env_count=_parse_count(args.active_app_env_count),
+        requires_foundry=_parse_tristate_bool(args.requires_foundry),
+        foundry_authorized=_parse_tristate_bool(args.foundry_authorized),
+        active_foundry_env_count=_parse_count(args.active_foundry_env_count),
+    )
+    _emit(result, args.format)
+    return 0 if result.decision is not Decision.BLOCKED else BLOCKED_EXIT_CODE
+
+
+def _emit(result: PreflightResult, output_format: str) -> None:
+    fields = {
+        "decision": result.decision.value,
+        "reason_code": result.reason_code,
+        "message": _sanitize_log(result.message),
+    }
+    if output_format == "json":
+        print(json.dumps(fields, sort_keys=True))
+    else:
+        print("\n".join(f"{key}={value}" for key, value in fields.items()))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

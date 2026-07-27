@@ -59,6 +59,11 @@ ACTION_GROUP_MAX = 260
 BUDGET_MAX = 63
 ACR_MIN = 5
 ACR_MAX = 50
+# Virtual Network name: length 2-64, alphanumerics, hyphens, underscores and
+# periods; must start with an alphanumeric. Our generated names use only
+# ``[a-z0-9-]`` and always start with a letter, so they satisfy the rule; we
+# assert the length ceiling defensively.
+VIRTUAL_NETWORK_MAX = 64
 # UNVERIFIED: the Container Apps *managed environment* max length is NOT
 # published (the ARM reference gives only the character pattern, no length), and
 # ``azd`` publishes no documented length limit on environment names either. We
@@ -262,6 +267,50 @@ def is_valid_acr_name(name: str) -> bool:
     )
 
 
+def virtual_network_name(managed_environment: str) -> str:
+    """``vnet-{managed_environment}-private`` -- length 2-64.
+
+    The private app-tier VNet name is anchored to the already-compacted
+    ``managed_environment`` token (<= 32 chars) rather than to the raw ``azd``
+    environment name. That is deliberate: ``infra/web.bicep`` previously built
+    ``vnet-fantasy-cards-{environmentName}-private``, which reaches 65 chars for
+    a real PR (``pr-26-relax-ci-ownership-gate-8ba70a79``) and overflows the
+    64-char VNet limit. Deriving from the bounded managed-environment token
+    keeps the name <= 45 chars for any input, so it can never overflow.
+    """
+    if not managed_environment:
+        raise ValueError("managed_environment must be a non-empty string")
+    name = f"vnet-{managed_environment}-private"
+    if not (2 <= len(name) <= VIRTUAL_NETWORK_MAX):
+        raise ValueError(
+            f"generated virtual network name {name!r} violates length "
+            f"2-{VIRTUAL_NETWORK_MAX}"
+        )
+    return name
+
+
+# --- CLI -> bicepparam env-var contract ---------------------------------------
+# The single, authoritative mapping between the log-safe JSON/env keys this
+# module emits (see PrEnvironmentNames.printable_fields) and the environment
+# variable names that infra/main.bicepparam reads via readEnvironmentVariable.
+# Phase 3 work item B (the GitHub Actions workflow) MUST export exactly these
+# variable names before ``azd provision`` so the PR-safe names reach Bicep; the
+# ``--format envvars`` output emits precisely this mapping to remove
+# hand-transcription risk. Only names owned by this module AND consumed by
+# main.bicepparam appear here; identity names (PLATFORM_IDENTITY_NAME /
+# APPLICATION_IDENTITY_NAME) are intentionally left to work item B because a
+# single managed_identity token does not map cleanly onto the two identity
+# parameters.
+BICEPPARAM_ENV_VARS: dict[str, str] = {
+    "environment_name": "AZURE_ENV_NAME",
+    "storage_account": "STORAGE_ACCOUNT_NAME",
+    "container_app": "CONTAINER_APP_NAME",
+    "managed_environment": "CONTAINER_APPS_ENVIRONMENT_NAME",
+    "virtual_network": "VIRTUAL_NETWORK_NAME",
+    "application_insights": "APPLICATION_INSIGHTS_NAME",
+}
+
+
 @dataclass(frozen=True)
 class PrEnvironmentNames:
     """The full set of deterministic names for one per-PR environment."""
@@ -278,6 +327,7 @@ class PrEnvironmentNames:
     storage_account: str
     container_app: str
     managed_environment: str
+    virtual_network: str
     managed_identity: str
     application_insights: str
     action_group: str
@@ -307,6 +357,7 @@ class PrEnvironmentNames:
             "storage_account": self.storage_account,
             "container_app": self.container_app,
             "managed_environment": self.managed_environment,
+            "virtual_network": self.virtual_network,
             "managed_identity": self.managed_identity,
             "application_insights": self.application_insights,
             "action_group": self.action_group,
@@ -324,6 +375,9 @@ def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
     slug = slug_from_branch(branch)
     digest = hash8(repo, pr_number, slug)
     env = environment_name(pr_number, slug, digest)
+    managed_environment = _compact_or_full(
+        env, MANAGED_ENVIRONMENT_DEFENSIVE_MAX, pr_number, digest
+    )
     return PrEnvironmentNames(
         repo=repo,
         pr_number=pr_number,
@@ -333,9 +387,8 @@ def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
         resource_group=_compact_or_full(env, RESOURCE_GROUP_MAX, pr_number, digest),
         storage_account=storage_account_name(pr_number, digest),
         container_app=container_app_name(pr_number, slug, digest),
-        managed_environment=_compact_or_full(
-            env, MANAGED_ENVIRONMENT_DEFENSIVE_MAX, pr_number, digest
-        ),
+        managed_environment=managed_environment,
+        virtual_network=virtual_network_name(managed_environment),
         managed_identity=_compact_or_full(
             env, MANAGED_IDENTITY_MAX, pr_number, digest
         ),
@@ -364,9 +417,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--format",
-        choices=("env", "json"),
+        choices=("env", "json", "envvars"),
         default="env",
-        help="output format: env (key=value lines) or json",
+        help=(
+            "output format: env (name=value using this module's keys), json, or "
+            "envvars (BICEPPARAM_ENV_VAR=value lines matching "
+            "infra/main.bicepparam, ready to append to $GITHUB_ENV)"
+        ),
     )
     return parser.parse_args(argv)
 
@@ -374,6 +431,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def _render_env(names: PrEnvironmentNames) -> str:
     return "\n".join(
         f"{key}={value}" for key, value in names.printable_fields().items()
+    )
+
+
+def _render_envvars(names: PrEnvironmentNames) -> str:
+    """Emit ``BICEPPARAM_ENV_VAR=value`` lines for the Bicep name contract.
+
+    The variable names are exactly those ``infra/main.bicepparam`` reads, so the
+    workflow can append this block straight to ``$GITHUB_ENV`` without
+    re-typing any name.
+    """
+    fields = names.printable_fields()
+    return "\n".join(
+        f"{env_var}={fields[key]}" for key, env_var in BICEPPARAM_ENV_VARS.items()
     )
 
 
@@ -388,6 +458,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.format == "json":
         print(json.dumps(names.printable_fields(), sort_keys=True))
+    elif args.format == "envvars":
+        print(_render_envvars(names))
     else:
         print(_render_env(names))
     return 0

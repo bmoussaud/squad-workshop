@@ -124,6 +124,128 @@ class WorkedExampleTests(unittest.TestCase):
         # Design doc example: "ca-fc-pr14-rcl-4717e5bb" -- hash8 corrected.
         self.assertEqual(self.names.container_app, f"ca-fc-pr14-rcl-{EXPECTED_PR14_HASH8}")
 
+    def test_virtual_network(self) -> None:
+        # Anchored to the compacted managed_environment token, not the raw azd
+        # env name, so it stays within the 64-char VNet limit.
+        self.assertEqual(
+            self.names.virtual_network,
+            f"vnet-{self.names.managed_environment}-private",
+        )
+
+
+class VirtualNetworkTests(unittest.TestCase):
+    SLUGS = [
+        "render-card-layout",
+        "relax-ci-ownership-gate",
+        "-".join(["seg"] * 25),
+        "verylongsinglewordwithnoseparatorsatallhere",
+    ]
+    PRS = [1, 14, 26, 999999]
+
+    def test_never_overflows_64_and_is_vnet_safe(self) -> None:
+        for pr in self.PRS:
+            for slug in self.SLUGS:
+                names = naming.compute_names(REPO, pr, f"squad/{pr}-{slug}")
+                vnet = names.virtual_network
+                self.assertLessEqual(len(vnet), 64, vnet)
+                self.assertGreaterEqual(len(vnet), 2, vnet)
+                # start alphanumeric, only [a-z0-9-]
+                self.assertRegex(vnet, r"^[a-z][a-z0-9-]*[a-z0-9]$", vnet)
+
+    def test_real_pr_example_would_have_overflowed_legacy_name(self) -> None:
+        # The legacy web.bicep name overflowed; the new one must not.
+        names = naming.compute_names(
+            REPO, 26, "squad/26-relax-ci-ownership-gate"
+        )
+        legacy = f"vnet-fantasy-cards-{names.environment_name}-private"
+        self.assertGreater(len(legacy), 64)
+        self.assertLessEqual(len(names.virtual_network), 64)
+
+    def test_generator_rejects_empty_managed_environment(self) -> None:
+        with self.assertRaises(ValueError):
+            naming.virtual_network_name("")
+
+
+class BicepparamContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.names = naming.compute_names(REPO, 26, "squad/26-relax-ci-ownership-gate")
+
+    def test_mapping_keys_are_all_printable_fields(self) -> None:
+        printable = self.names.printable_fields()
+        for key in naming.BICEPPARAM_ENV_VARS:
+            self.assertIn(key, printable, key)
+
+    def test_mapping_targets_expected_bicepparam_env_vars(self) -> None:
+        self.assertEqual(
+            naming.BICEPPARAM_ENV_VARS,
+            {
+                "environment_name": "AZURE_ENV_NAME",
+                "storage_account": "STORAGE_ACCOUNT_NAME",
+                "container_app": "CONTAINER_APP_NAME",
+                "managed_environment": "CONTAINER_APPS_ENVIRONMENT_NAME",
+                "virtual_network": "VIRTUAL_NETWORK_NAME",
+                "application_insights": "APPLICATION_INSIGHTS_NAME",
+            },
+        )
+
+    def test_envvars_format_emits_bicepparam_names(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = naming.main(
+                [
+                    "--repo",
+                    REPO,
+                    "--pr-number",
+                    "26",
+                    "--branch",
+                    "squad/26-relax-ci-ownership-gate",
+                    "--format",
+                    "envvars",
+                ]
+            )
+        self.assertEqual(code, 0)
+        lines = {
+            line.split("=", 1)[0]: line.split("=", 1)[1]
+            for line in buffer.getvalue().splitlines()
+            if line
+        }
+        self.assertEqual(set(lines), set(naming.BICEPPARAM_ENV_VARS.values()))
+        self.assertEqual(lines["CONTAINER_APP_NAME"], self.names.container_app)
+        self.assertEqual(
+            lines["CONTAINER_APPS_ENVIRONMENT_NAME"], self.names.managed_environment
+        )
+        self.assertEqual(lines["STORAGE_ACCOUNT_NAME"], self.names.storage_account)
+        self.assertEqual(lines["VIRTUAL_NETWORK_NAME"], self.names.virtual_network)
+        self.assertEqual(lines["AZURE_ENV_NAME"], self.names.environment_name)
+
+    def test_envvars_values_carry_no_injection_primitives(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            naming.main(
+                [
+                    "--repo",
+                    REPO,
+                    "--pr-number",
+                    "26",
+                    "--branch",
+                    "squad/26-foo%0A::error::x",
+                    "--format",
+                    "envvars",
+                ]
+            )
+        for line in buffer.getvalue().splitlines():
+            if not line:
+                continue
+            _var, _, value = line.partition("=")
+            self.assertNotRegex(value, r"[\x00-\x1f\x7f]")
+            self.assertRegex(value, r"^[a-z0-9-]+$")
+
 
 class StorageInvariantTests(unittest.TestCase):
     def test_lowercase_alnum_and_length(self) -> None:
@@ -233,6 +355,8 @@ class PropertySweepTests(unittest.TestCase):
                 self.assertLessEqual(
                     len(names.managed_environment), 32, names.managed_environment
                 )
+                self.assertLessEqual(len(names.virtual_network), 64, names.virtual_network)
+                self.assertRegex(names.virtual_network, r"^[a-z][a-z0-9-]*[a-z0-9]$")
                 self.assertLessEqual(len(names.resource_group), 90)
                 self.assertTrue(names.environment_name.startswith(f"pr-{pr}-"))
                 self.assertTrue(names.environment_name.endswith(names.hash8))
