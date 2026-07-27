@@ -1,0 +1,160 @@
+# Per-PR ephemeral Azure environment: DAILY TTL JANITOR.
+#
+# Design: docs/design/pr-ephemeral-environments.md ("Janitor path" ~L104-108,
+# "Cost & lifecycle" ~L165-170). Mandatory backstop cleanup for environments the
+# close-time teardown (pr-environment-teardown.yml) missed: failed close
+# workflows, deleted branches, or any resource group that leaked past its TTL.
+#
+# PRODUCT DECISION (already made): the janitor DELETES IMMEDIATELY on expiry.
+# There is no mark-then-delete grace period.
+#
+# SECURITY MODEL: this is the highest-risk job in the initiative -- a scheduled
+# workflow holding delete permissions. Two hard guardrails:
+#  1. The reap/keep decision is NOT made in this YAML. `az group list` only
+#     produces CANDIDATES; the authoritative, allowlist-based decision lives in
+#     the tested Python reaper (infra/scripts/pr_env_reaper.py). The delete loop
+#     iterates STRICTLY over the names the reaper returned -- there is no bash or
+#     `--query` path that can delete a group the reaper did not name.
+#  2. No attacker-controlled `github.event.*` value is interpolated into any
+#     `run:` block; the only inputs are the reaper output (constrained Azure RG
+#     names), a self-generated timestamp, and a closed-PR list built from the
+#     API. All are passed via `env:` and read as quoted shell variables.
+
+name: PR Azure Environment Janitor
+
+on:
+  # Daily backstop. NOTE: GitHub disables `schedule` triggers after 60 days of
+  # repository inactivity; if the repo goes quiet, re-enable this workflow (or
+  # run it via the workflow_dispatch below) to resume automatic reaping.
+  schedule:
+    - cron: '17 3 * * *'
+  # Manual run, with an optional dry-run that reports what WOULD be reaped
+  # without deleting anything.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Report what would be reaped without deleting'
+        type: boolean
+        required: false
+        default: false
+
+# Default to read-only; the reap job widens only what it needs.
+permissions:
+  contents: read
+
+# One janitor run at a time: overlapping reaps would race on the same groups.
+concurrency:
+  group: pr-azure-janitor
+  cancel-in-progress: false
+
+jobs:
+  reap:
+    name: Reap expired / orphaned PR environments
+    runs-on: ubuntu-latest
+    environment: azure-pr-app
+    permissions:
+      contents: read # checkout the reaper script
+      id-token: write # Azure OIDC login
+      pull-requests: read # enumerate closed PRs for orphan reaping
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Azure CLI login (OIDC, for az group list/delete)
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Collect closed PR numbers (for orphan reaping)
+        id: closed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Orphans from a failed close-time teardown are keyed by their
+          # immutable pr-number tag. We hand the reaper the set of closed PRs so
+          # it can reap a leaked group even if its TTL has not yet elapsed. The
+          # 7-day expires-at tag independently backstops anything older than this
+          # window. numbers are integers from the API -> a plain comma list.
+          nums="$(gh pr list --state closed --limit 200 --json number \
+            --jq 'map(.number | tostring) | join(",")')"
+          echo "Closed PRs (recent 200): ${nums}"
+          echo "closed_prs=${nums}" >> "$GITHUB_OUTPUT"
+
+      - name: Evaluate reap set (reaper is authoritative)
+        id: reap
+        env:
+          CLOSED_PRS: ${{ steps.closed.outputs.closed_prs }}
+        run: |
+          set -euo pipefail
+          # --now is injected EXPLICITLY; nothing reads an implicit clock.
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "now=${NOW}"
+
+          # First-pass, server-side candidate FILTER only (not the decision):
+          # narrow to ephemeral pr-app groups so we do not stream the whole
+          # subscription through the reaper. The authoritative reap/keep verdict
+          # is still made by the reaper below.
+          candidates="$(az group list \
+            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app']" \
+            -o json)"
+
+          # The reaper consumes the raw `az group list` JSON (name/location/tags),
+          # decides reap-or-keep per group with a reason_code, and with
+          # --format env emits a `reap_names=` line (+ count) for $GITHUB_OUTPUT.
+          # Non-zero exit == malformed input -> fail the run (set -e).
+          reap_out="$(printf '%s' "${candidates}" | python3 infra/scripts/pr_env_reaper.py \
+            --groups-json - \
+            --now "${NOW}" \
+            --closed-pr-numbers "${CLOSED_PRS}" \
+            --format env)"
+          printf '%s\n' "${reap_out}"
+          printf '%s\n' "${reap_out}" >> "$GITHUB_OUTPUT"
+
+      - name: Delete reaped groups (only what the reaper named)
+        env:
+          # Reaper output (constrained Azure RG names), passed via env and read
+          # as a quoted variable -- never interpolated into the script body.
+          REAP_NAMES: ${{ steps.reap.outputs.reap_names }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -uo pipefail
+          # Accept either whitespace- or comma-delimited reap_names; Azure RG
+          # names contain neither, so this split is unambiguous.
+          names="$(printf '%s' "${REAP_NAMES:-}" | tr ',' ' ')"
+          if [ -z "$(printf '%s' "${names}" | tr -d '[:space:]')" ]; then
+            echo "Reaper named no groups; nothing to reap."
+            exit 0
+          fi
+
+          # Dry-run: report only. Scheduled runs have an empty DRY_RUN and delete.
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            for rg in ${names}; do
+              echo "::notice::[dry-run] would reap resource group ${rg}"
+            done
+            exit 0
+          fi
+
+          # Resilient delete: one failure must not abandon the rest, but the job
+          # must still surface a clear failure. We do NOT `|| true` real
+          # failures -- only "already gone" (a concurrent teardown/janitor beat
+          # us) counts as success.
+          failed=""
+          for rg in ${names}; do
+            echo "Reaping resource group ${rg}"
+            if az group delete --name "${rg}" --yes; then
+              echo "::notice::Reaped ${rg}"
+            elif az group show --name "${rg}" >/dev/null 2>&1; then
+              echo "::error::Failed to delete resource group ${rg}"
+              failed="${failed} ${rg}"
+            else
+              echo "Resource group ${rg} already gone; treating as success."
+            fi
+          done
+
+          if [ -n "${failed}" ]; then
+            echo "::error::Janitor failed to delete:${failed}"
+            exit 1
+          fi
+          echo "Janitor complete; all reaped groups deleted."

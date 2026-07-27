@@ -1,0 +1,210 @@
+# Per-PR ephemeral Azure environment: CLOSE-TIME TEARDOWN.
+#
+# Design: docs/design/pr-ephemeral-environments.md ("Teardown path" ~L99-102,
+# "Workflow concurrency" ~L110-114, "Cost & lifecycle" ~L165-170).
+#
+# This is the cost-critical half of the lifecycle: a merged or abandoned PR must
+# have its Azure environment destroyed immediately, otherwise it bills forever.
+# The daily janitor (pr-environment-janitor.yml) is only the backstop; this
+# workflow is the primary reclaim path.
+#
+# SECURITY MODEL (why this uses `pull_request`, never `pull_request_target`):
+# identical to the deploy workflow (pr-environment.yml). `pull_request` runs in
+# the *head* context with a read-only token and NO access to the `azure-pr-app`
+# environment's OIDC federation for forks, so a fork PR can never obtain Azure
+# credentials -- not even "just to clean up". `pull_request_target` would run
+# privileged in the base context and hand fork-authored code write access +
+# secrets, which we refuse. Fork PRs never got an environment (preflight blocks
+# them at deploy time), so there is nothing for a fork to tear down anyway; the
+# `teardown` job is skipped for forks at the JOB level (see its `if:`), so it
+# never attempts an Azure login it could not complete.
+#
+# NO attacker-controlled `github.event.*` value is interpolated into any `run:`
+# block. `pr-number` is the only PR fact teardown needs; it is a validated
+# integer, passed via `env:` and read as a quoted "$PR_NUMBER" (requirement:
+# Phase 3 held this line strictly; so does this file).
+
+name: PR Azure Environment Teardown
+
+on:
+  pull_request:
+    # `closed` fires for BOTH merged and abandoned PRs. Both must tear down.
+    types: [closed]
+
+# Default to read-only; each job widens only what it needs.
+permissions:
+  contents: read
+
+# CONCURRENCY DESIGN (design L110-114 -- a genuine choice, not boilerplate):
+#
+# The deploy workflow uses group `pr-azure-<number>` with cancel-in-progress:true
+# so a new push cancels an obsolete deploy. Teardown must NOT share that group,
+# because a deploy run triggered by a `synchronize` landing just before the close
+# (or by a later `reopened`) carries cancel-in-progress:true and would CANCEL an
+# in-flight teardown mid-delete -- exactly the "close-time cleanup interrupted by
+# an obsolete deploy run" failure the design warns against.
+#
+# So teardown gets its OWN group, `pr-azure-teardown-<number>`, which no deploy
+# run can ever cancel, and sets cancel-in-progress:false so that a rapid
+# re-close (or a duplicate `closed` event) does not cancel a teardown that is
+# already deleting resources -- the second teardown queues behind the first
+# instead. Net effect: once a teardown starts, it runs to completion. Teardown
+# wins. The only residual race (a deploy still provisioning into the same RG
+# while teardown deletes it) ends with the group deleted either way, and is
+# additionally backstopped by the daily janitor, which reaps by the immutable
+# `pr-number`/`expires-at` tags.
+concurrency:
+  group: pr-azure-teardown-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  # --- Teardown: OIDC login, tag-scoped resource-group delete ----------------
+  # id-token: write lives ONLY on this job. Skipped for forks (they never got an
+  # environment and cannot obtain credentials), so it never attempts a login it
+  # cannot complete -- the fork case no-ops as a skipped job (workflow success).
+  # We accept `== false` skip-on-ambiguity here: unlike deploy, a wrong verdict
+  # is not fail-open (a mistakenly-skipped teardown just leaks to the janitor,
+  # never grants privilege), and a fork has nothing to tear down regardless.
+  teardown:
+    name: Tear down PR environment
+    if: github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    environment: azure-pr-app
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      status: ${{ steps.reclaim.outputs.status }}
+    steps:
+      - name: Azure CLI login (OIDC, for az group/tag)
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Reclaim the PR resource group (tag-scoped, idempotent)
+        id: reclaim
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          # WHY tag-scoped `az group delete` and NOT `azd down --purge`:
+          #  * `azd down` needs azd's environment state (.azure/<env>/.env plus
+          #    the provisioned deployment records) to know WHAT to destroy. None
+          #    of that exists on a fresh runner and cannot be reliably rebuilt
+          #    from `azd env new` alone, so `azd down` here would be fragile.
+          #  * The RG already carries the immutable identity tags this teardown
+          #    (and the janitor's reaper) trust: ephemeral=true,
+          #    environment-type=pr-app, pr-number=<n>. Selecting by ALL THREE is
+          #    an allowlist: a matched group is positively proven to be THIS PR's
+          #    ephemeral app environment, so the delete can never hit an untagged
+          #    or wrongly-tagged group.
+          #  * `--purge` exists only to reclaim soft-deleted Key Vault / Cognitive
+          #    Services. Per design, PR stacks set DEPLOY_FOUNDRY=false, use the
+          #    SHARED Foundry, and contain no per-PR Key Vault -- so there is
+          #    nothing soft-deleted to purge, and `az group delete` is
+          #    functionally equivalent to `azd down --purge` for this stack.
+          #
+          # PR_NUMBER is a validated integer read from env, never interpolated
+          # into the --query string from github.event.
+          matches="$(az group list \
+            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app' && tags.\"pr-number\"=='${PR_NUMBER}'].name" \
+            -o tsv)"
+
+          # IDEMPOTENCY: an empty match set is the expected no-op, NOT a failure.
+          # It covers every "nothing to tear down" case: the PR never deployed
+          # (draft / fork / preflight-blocked), the group was already deleted, or
+          # a previous teardown completed. Exit 0.
+          if [ -z "${matches}" ]; then
+            echo "No ephemeral pr-app resource group tagged pr-number=${PR_NUMBER}; nothing to tear down."
+            echo "status=noop" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Delete every matched group (normally exactly one). We do NOT blanket
+          # `|| true` the delete -- a genuine deletion failure must fail the run.
+          # We only treat "the group is already gone" (e.g. the janitor or a
+          # concurrent teardown removed it first) as success, distinguishing
+          # "nothing to do" from "deletion failed".
+          rc=0
+          while IFS= read -r rg; do
+            [ -z "${rg}" ] && continue
+            echo "Deleting resource group: ${rg}"
+            if az group delete --name "${rg}" --yes; then
+              echo "Deleted ${rg}"
+            elif az group show --name "${rg}" >/dev/null 2>&1; then
+              echo "::error::Failed to delete resource group ${rg}"
+              rc=1
+            else
+              echo "Resource group ${rg} already gone (concurrent teardown/janitor); treating as success."
+            fi
+          done <<< "${matches}"
+
+          if [ "${rc}" -ne 0 ]; then
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "status=deleted" >> "$GITHUB_OUTPUT"
+
+  # --- Comment: update the existing PR environment comment -------------------
+  # pull-requests: write lives ONLY on this job. It UPDATES the Phase 3
+  # find-and-update comment (marker <!-- pr-azure-env -->) in place; it never
+  # creates a new comment, so a PR that never deployed stays comment-free.
+  comment:
+    name: Update PR comment (teardown status)
+    needs: teardown
+    if: always() && github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Reflect teardown status on the environment comment
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        env:
+          TEARDOWN_RESULT: ${{ needs.teardown.result }}
+          TEARDOWN_STATUS: ${{ needs.teardown.outputs.status }}
+        with:
+          script: |
+            // All dynamic content comes from process.env (job results/outputs);
+            // nothing secret or attacker-controlled is included. We only edit an
+            // EXISTING marker comment -- if none exists (PR never deployed), we
+            // do nothing rather than posting a fresh teardown comment.
+            const marker = '<!-- pr-azure-env -->';
+            const result = process.env.TEARDOWN_RESULT || '';
+            const status = process.env.TEARDOWN_STATUS || '';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
+
+            let line;
+            if (result === 'success' && status === 'deleted') {
+              line = '🧹 Torn down — the ephemeral Azure environment was deleted when this PR closed.';
+            } else if (result === 'success' && status === 'noop') {
+              line = '🧹 Nothing to tear down — no ephemeral Azure environment was found for this PR.';
+            } else {
+              line = '⚠️ Teardown did not complete — the ephemeral Azure environment may still exist. The daily janitor will reclaim it; see the run logs.';
+            }
+
+            const body = [
+              marker,
+              '## 🌩️ PR Azure environment',
+              '',
+              `**Status:** ${line}`,
+              '',
+              `[View teardown run logs](${runUrl})`,
+              '',
+              '<sub>Ephemeral app-tier environment lifecycle. Backstopped by the daily TTL janitor.</sub>',
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              // No environment comment => the PR never deployed. Nothing to update.
+              core.info('No PR environment comment found; nothing to update.');
+            }
