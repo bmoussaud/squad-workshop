@@ -3,6 +3,12 @@ targetScope = 'resourceGroup'
 param location string
 param tags object
 param environmentName string
+@description('Create a new Azure Container Registry in this resource group. Defaults to true; PR environments should set this to false and pull from the shared ACR instead.')
+param deployAcr bool = true
+@description('Existing shared Azure Container Registry name. Required when deployAcr is false.')
+param sharedContainerRegistryName string = ''
+@description('Resource group containing the shared Azure Container Registry when deployAcr is false. Defaults to this deployment resource group.')
+param sharedContainerRegistryResourceGroupName string = ''
 param applicationIdentityClientId string
 param applicationIdentityPrincipalId string
 param applicationIdentityResourceId string
@@ -38,12 +44,13 @@ var privateInfrastructureSubnetName = 'snet-container-apps-infrastructure'
 var privateEndpointSubnetName = 'snet-private-endpoints'
 var privateEndpointName = 'pe-${storageAccountName}-blob'
 var privateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
+var resolvedSharedContainerRegistryResourceGroupName = empty(sharedContainerRegistryResourceGroupName) ? resourceGroup().name : sharedContainerRegistryResourceGroupName
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
 	name: last(split(applicationInsightsResourceId, '/'))
 }
 
-module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' = {
+module containerRegistry 'br/public:avm/res/container-registry/registry:0.9.3' = if (deployAcr) {
 	name: 'container-registry-${resourceToken}'
 	params: {
 		name: containerRegistryName
@@ -137,9 +144,26 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.9.1' = {
 	}
 }
 
-resource containerRegistryResource 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = {
+resource containerRegistryResource 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = if (deployAcr) {
 	name: containerRegistryName
 }
+
+// Shared ACR reference path (deployAcr = false, e.g. PR environments). No new registry is created; the PR
+// application identity is granted AcrPull on the existing shared registry via a nested module because a
+// resource's `scope` must match its own file's target scope, and the shared registry may live in another
+// resource group than this deployment.
+module sharedAcrRbac 'modules/shared-acr-rbac.bicep' = if (!deployAcr) {
+	name: 'shared-acr-rbac-${resourceToken}'
+	scope: resourceGroup(resolvedSharedContainerRegistryResourceGroupName)
+	params: {
+		containerRegistryName: sharedContainerRegistryName
+		principalId: applicationIdentityPrincipalId
+		roleDefinitionId: acrPullRoleDefinitionId
+		roleDescription: 'Allow the fantasy cards application identity to pull container images from the shared registry.'
+	}
+}
+
+var containerRegistryLoginServer = deployAcr ? containerRegistry.outputs.loginServer : sharedAcrRbac.outputs.loginServer
 
 resource storageAccountResource 'Microsoft.Storage/storageAccounts@2025-01-01' existing = {
 	name: storageAccountName
@@ -300,7 +324,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 		registries: [
 				{
 					identity: applicationIdentityResourceId
-					server: containerRegistry.outputs.loginServer
+					server: containerRegistryLoginServer
 				}
 			]
 		containers: [
@@ -432,7 +456,7 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 		registries: [
 			{
 				identity: applicationIdentityResourceId
-				server: containerRegistry.outputs.loginServer
+				server: containerRegistryLoginServer
 			}
 		]
 		containers: [
@@ -549,7 +573,7 @@ resource privateContainerAppResource 'Microsoft.App/containerApps@2024-10-02-pre
 }
 
 // native-bicep-fallback: The registry AVM supports registry-scoped assignments, but this explicit assignment preserves the existing deterministic name and role-definition-ID contract.
-resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (deployAcr) {
 	scope: containerRegistryResource
 	name: guid(containerRegistryResource.id, applicationIdentityPrincipalId, acrPullRoleDefinitionId)
 	dependsOn: [
@@ -562,6 +586,9 @@ resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 		description: 'Allow the fantasy cards application identity to pull container images from the registry.'
 	}
 }
+
+// Shared ACR reference path (deployAcr = false, e.g. PR environments): AcrPull on the existing shared registry is
+// granted by the `sharedAcrRbac` module above instead of creating a per-PR registry.
 
 // native-bicep-fallback: The Storage AVM does not expose the required artifact-container scope for this least-privilege assignment.
 resource blobDataAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -675,7 +702,8 @@ resource privateAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01
 }
 
 // native-bicep-fallback: The registry diagnostic setting preserves the current dedicated Log Analytics destination and category selection.
-resource registryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+// Only applies to a registry created in this deployment; a shared/external registry's diagnostics remain owned by its own environment.
+resource registryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployAcr) {
 	scope: containerRegistryResource
 	name: 'send-to-log-analytics'
 	properties: {
@@ -967,6 +995,6 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 output serviceUri string = 'https://${privateContainerApp.outputs.fqdn}'
 output containerAppName string = privateContainerApp.outputs.name
 output containerAppsEnvironmentName string = privateContainerAppsEnvironment.name
-output containerRegistryEndpoint string = containerRegistry.outputs.loginServer
+output containerRegistryEndpoint string = containerRegistryLoginServer
 output storageAccountUrl string = storageAccount.outputs.primaryBlobEndpoint
 output blobContainerName string = artifactContainer.name
