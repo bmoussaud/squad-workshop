@@ -450,6 +450,19 @@ class ReaperCliTests(unittest.TestCase):
             reaper._parse_args([])
         self.assertEqual(ctx.exception.code, 2)
 
+    def test_malformed_input_exit_code_is_a_nonzero_literal(self) -> None:
+        # The contract ("never exit 0 on garbage") must be pinned to a concrete
+        # non-zero value, distinct from success (0) and from an argparse usage
+        # error (2). Asserting only ``code == MALFORMED_INPUT_EXIT_CODE``
+        # elsewhere lets a mutation that sets the constant itself to 0 survive,
+        # because the assertion moves with the constant.
+        self.assertEqual(reaper.MALFORMED_INPUT_EXIT_CODE, 3)
+        self.assertNotIn(reaper.MALFORMED_INPUT_EXIT_CODE, (0, 2))
+        # And an actual malformed run must return that same non-zero literal.
+        code, _ = _run("{not json", fmt="json")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(code, 3)
+
     def test_reader_reads_from_file_path(self) -> None:
         payload = [_group(name="rg-pr-14-expired", expires_at=PAST)]
         tmp = Path(__file__).resolve().parent / "_reaper_fixture.json"
