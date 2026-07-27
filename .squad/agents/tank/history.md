@@ -36,3 +36,11 @@
 📌 Team update (2026-07-23T08:27:28+0000): Azure provisioning, D4 validation, deployment, diagnostics, telemetry/RBAC repair, and application-only recovery completed. The real repaired revision is healthy and receives 100% traffic; Storage remains `publicNetworkAccess=Disabled` under management-group policy, so generation is intentionally degraded and D4 charges continue. — recorded by Scribe
 
 📌 Team update (2026-07-23T08:27:28+0000): Public-endpoint repair cannot survive policy evaluation. Policy-compliant Blob recovery requires separately approved parallel VNet-integrated Container Apps environment replacement, Blob private endpoint, and private DNS. bmoussaud chose hold state unchanged; do not provision private networking or decommission the current D4 environment without new approval. — decided by Morpheus; recorded by Scribe
+
+### 2026-07-27T14:24:13+02:00 — Issue #16: PR-env deterministic naming + safety preflight (Phase 1)
+Delivered infra/scripts/pr_environment_names.py + infra/scripts/pr_preflight.py + tests/test_pr_environment_names.py (36 tests, all pass; full suite 117 pass). Std-lib only, placed in infra/scripts per platform-tooling convention. Flagged hash8 doc discrepancy: rule yields 4c32c628, doc example says 4717e5bb — implemented the rule, asserted computed value, left doc fix to humans (doc lives on another branch).
+
+### 2026-07-27T14:38:43+02:00 — Issue #16 follow-up: Fact Checker findings applied
+Enforced Container Apps start-letter/end-alnum + min length 2 (regex + validator), added degenerate/truncation tests. Handled undocumented managed-environment & azd limits with defensive compaction (no uncited limits asserted). Documented hash8 canonical owner/repo input contract. hash8 doc example 4717e5bb confirmed unreproducible across 5 repo forms — asserting computed 4c32c628. Full suite 120 pass.
+
+📌 Team update (2026-07-27T14:24:13+02:00): Your Phase 1 names are authoritative but remain unconsumed by `web.bicep`; Phase 3/#15 must pass precomputed container-app, storage-account, and managed-environment names as parameters. Rai rejected the original trust/Foundry controls; Tank was locked out while Morpheus independently remediated them, and Rai then approved GREEN (148 tests).
