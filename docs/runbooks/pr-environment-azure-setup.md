@@ -30,20 +30,23 @@ does not need a second Entra federated credential.
 
 Federated credential:
 
-| Field     | Value                                                       |
-|-----------|-------------------------------------------------------------|
-| name      | `github-pr-app-environment`                                 |
-| issuer    | `https://token.actions.githubusercontent.com`               |
-| subject   | `repo:bmoussaud/squad-workshop:environment:azure-pr-app`    |
-| audiences | `api://AzureADTokenExchange`                                |
+| Field     | Value                                                                            |
+|-----------|----------------------------------------------------------------------------------|
+| name      | `github-pr-app-environment`                                                      |
+| issuer    | `https://token.actions.githubusercontent.com`                                    |
+| subject   | `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`       |
+| audiences | `api://AzureADTokenExchange`                                                     |
 
-The subject must match GitHub's OIDC claim exactly: `repo:{owner}/{repo}:environment:{env}`.
+The subject must match GitHub's OIDC claim exactly. In this account GitHub emits the owner/repository-id form shown above (`repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`), not the shorter `repo:{owner}/{repo}:environment:{env}` form. Verify against the `subject claim` line printed by `Azure/login` if the account OIDC template changes.
 
 ```bash
 az ad app create --display-name squad-workshop-pr-envs
 az ad sp create --id <appId>
 # fedcred.json holds the four fields in the table above
 az ad app federated-credential create --id <appId> --parameters fedcred.json
+# If an old credential used repo:bmoussaud/squad-workshop:environment:azure-pr-app,
+# add or replace it with the owner/repository-id subject above; otherwise
+# Azure returns AADSTS700213 before any provision/teardown action runs.
 ```
 
 ## 2. RBAC (subscription scope)
