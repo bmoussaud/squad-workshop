@@ -682,6 +682,9 @@ resource privateEnvironmentDiagnostics 'Microsoft.Insights/diagnosticSettings@20
 resource appDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
 	scope: containerAppResource
 	name: 'send-to-log-analytics'
+	dependsOn: [
+		containerApp
+	]
 	properties: {
 		workspaceId: logAnalyticsWorkspaceResourceId
 		logAnalyticsDestinationType: 'Dedicated'
@@ -971,6 +974,9 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 	name: 'alert-fantasy-cards-replicas-${environmentName}'
 	location: 'global'
 	tags: tags
+	dependsOn: [
+		containerApp
+	]
 	properties: {
 		description: 'Container App replica count exceeded the approved ceiling of two.'
 		enabled: true

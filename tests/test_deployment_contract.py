@@ -312,6 +312,17 @@ class DeploymentContractTests(unittest.TestCase):
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
 
+    def test_public_container_app_monitoring_waits_for_avm_module(self) -> None:
+        app_diagnostics = extract_bicep_block(
+            self.web_bicep, "resource", "appDiagnostics"
+        )
+        replica_alert = extract_bicep_block(
+            self.web_bicep, "resource", "replicaCeilingAlert"
+        )
+        for block in (app_diagnostics, replica_alert):
+            self.assertIn("dependsOn:", block)
+            self.assertIn("containerApp", block)
+
     def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
         migration = self.legacy_blob_role_migration
 
