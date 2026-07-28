@@ -71,3 +71,5 @@ Fixed two non-blocking advisories in .github/workflows/pr-environment-teardown.y
 - Verified: compliant branch + real ACR => decision=proceed; empty ACR => invalid_service_name.
 - Finding: PR #30 branch `bmoussaud-musical-spork` fails the name gate (invalid_names) before the ACR check, so its preflight stays red by design. Rerun confirmed SHARED_ACR_NAME now populated.
 - Added runbook docs/runbooks/pr-environment-azure-setup.md.
+
+📌 Team update (2026-07-27T14:44:52+02:00): Cancelled the stale merge path for `fix/9-private-blob-artifact` after Switch verified it had already been squash-merged to `origin/main` as `0775c47` with an identical tree. Cleaned up the obsolete fix/9 worktree/branch, its subset recovery/provisioning/testing worktrees and local branches, the zero-ahead Neo investigation worktree/branch, and the fully merged remote-only refs `copilot/status-per-env-issues`, `copilot/status-per-env-issues-again`, `squad/3-add-ci-validation-gates`, and `squad/19-per-pr-envs-phase2-bicep-azd`. Remote deletion used `gh api`; no `git push` was used.

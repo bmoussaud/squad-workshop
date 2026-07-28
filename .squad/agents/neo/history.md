@@ -24,3 +24,5 @@
 📌 Team update (2026-07-27T08:47:25.103+02:00): Live-endpoint validation of 1024x1536 output plus title/stats legibility remains an open follow-up on PR #13 — decided by Benoit (via Squad Coordinator).
 
 📌 Team update (2026-07-27T09:42:54.356+02:00): Per-PR ephemeral Azure environment design includes a gated post-deploy live-Foundry validation hook for sanitized image-generation evidence, tied to issue #4 and the issue #11 card-layout follow-up. — decided by Morpheus, Tank
+
+📌 Team update (2026-07-27T14:44:52+02:00): Stale branch `bmoussaud-neo-investigating-artifact-bug` was cleaned up after verifying the relevant fix/9 content was already squash-merged on main as `0775c47`. Squash-merge SHA divergence can create phantom `N commits ahead` branches even when the tree is integrated; compare trees before rebasing or merging stale work. — recorded by Scribe
