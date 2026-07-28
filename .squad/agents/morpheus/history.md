@@ -33,3 +33,13 @@
 
 
 📌 Team update (2026-07-27T21:30:07+02:00): Phase 4 (#20) complete — per-PR ephemeral environment lifecycle is now closed end-to-end. TTL reaper (Trinity, 5677e3f): stdlib allowlist decision engine, 53 tests. Teardown/janitor workflows (Tank, e6d2b2e): tag-scoped `az group delete`, separate concurrency group, bash-free reap decisions. Rai: 🟢 GREEN (proved allowlist adversarially). Switch: APPROVE WITH CHANGES (pinned `MALFORMED_INPUT_EXIT_CODE` to concrete `3` — security-bearing constant now tested by value not by self-reference). Tank advisory pass (7e4f1e9): az-query failure now exits loudly; real `^[0-9]+$` guard on PR_NUMBER. Test count: 192 → 246. — recorded by Scribe
+
+- 2026-07-28T09:57:00+02:00: Produced lead-level project status summary for Benoit from repo evidence, decisions, current focus, routing, and open GitHub issues. Verified Foundry provisioning remains blocked on explicit Product Owner approval; no new decisions recorded.
+📌 Team update (2026-07-28T09:55:56+02:00): Status-summary corrected shared state — dev Azure infrastructure is deployed in `rg-fantasy-cards-dev-8f327f8c` and `gpt-image-2-dev` succeeded; prior no-resources state was stale. — decided by status-summary session requested by Benoit
+📌 Team update (2026-07-28T09:55:56+02:00): Status-summary corrected quality gate state — CI exists and runs tests, but branch protection is not enabled, so merges are ungated until protection is configured. — decided by status-summary session requested by Benoit
+
+📌 Team update (2026-07-28T10:05:06+02:00): Benoit Moussaud (Product Owner) approved the Foundry stack for development only and retroactively accepted `rg-fantasy-cards-dev-8f327f8c`. Production remains gated on #37 user-facing notice, #36 retention/deletion policy, #38 likeness/IP/minors policy, and #39 revalidate GlobalStandard routing; #39 may invalidate the EU-only assumption behind the approval. Supporting analysis: Tank confirmed Azure state/spend/RAI policy; Rai rated the gate 🟡 YELLOW for dev only.
+
+- 2026-07-28T10:31:38+02:00: Updated `docs/design/azure-deployment.md` to mark the `gpt-image-2` `GlobalStandard` data-residency question as decided by Benoit in issue #2: inference processing may leave the EU, data at rest remains in the customer-designated geography, and only latency/network/egress/failure-coupling gates remain open.
+
+📌 Team update (2026-07-28T10:14:07+02:00): Foundry architecture/governance now accepts GlobalStandard non-EU inference for gpt-image-2 in dev and production; data at rest/artifacts remain in France Central/customer-designated storage. Earlier dev-only EU-premise approval is superseded. — decided by Benoit Moussaud
