@@ -15,10 +15,9 @@
 - `.squad/decisions.md` — the shared decision log all agents read (canonical, merged)
 - `.squad/decisions/inbox/` — decision drop-box (agents write here, I merge)
 - Cross-agent context propagation — when one agent's decision affects another
-- Decision archival — **HARD GATE**: enforce two-tier ceiling on decisions.md before every merge:
-  - **Tier 1 (30-day):** If >20KB, archive entries older than 30 days
-  - **Tier 2 (7-day):** If still >50KB after Tier 1, archive entries older than 7 days
-  - Emit HEALTH REPORT to session log after archival runs
+- Decision-ledger maintenance — **HARD GATE**: run `python .squad/scripts/decision_ledger.py --team-root .squad reconcile` before every merge.
+  - It losslessly migrates legacy content, validates schema, archives only graph-derived superseded entries to 20KB, and never archives active decisions for size.
+  - Exit 3 / `BLOCKED_ACTIVE_OVERFLOW` is visible: preserve inbox data, report it, and do not merge further active decisions.
 
 ## How I Work
 
@@ -36,22 +35,15 @@ After every substantial work session:
    - Brief. Facts only.
 
 2. **Merge the decision inbox:**
-   - List all files in `decisions/inbox/` with `squad_state_list`
-   - Read each entry with `squad_state_read`
-   - Append each decision's contents to `decisions.md` with `squad_state_write` after dedupe
-   - Delete each inbox file after merging with `squad_state_delete`
+   - For local state, the decision-ledger gate is authoritative; do not append raw inbox text or infer semantic overlap.
+   - Invalid entries are losslessly quarantined with a hash and diagnostic. Valid entries merge only when the post-compaction ledger is within the 50KB hard cap.
+   - A submitted successor must name predecessor IDs in `**Supersedes:**`; Scribe derives predecessor state. `[]` explicitly keeps a foundational decision active.
+   - For non-local state, stop rather than bypass the runtime persistence contract.
 
-3. **Deduplicate and consolidate decisions.md:**
-   - Parse the file into decision blocks (each block starts with `### `).
-   - **Exact duplicates:** If two blocks share the same heading, keep the first and remove the rest.
-   - **Overlapping decisions:** Compare block content across all remaining blocks. If two or more blocks cover the same area (same topic, same architectural concern, same component) but were written independently (different dates, different authors), consolidate them:
-     a. Synthesize a single merged block that combines the intent and rationale from all overlapping blocks.
-     b. Use the literal CURRENT_DATETIME value from your spawn prompt and a new heading: `### <CURRENT_DATETIME value>: {consolidated topic} (consolidated)`. Substitute the actual timestamp; do not write placeholder text.
-     c. Credit all original authors: `**By:** {Name1}, {Name2}`
-     d. Under **What:**, combine the decisions. Note any differences or evolution.
-     e. Under **Why:**, merge the rationale, preserving unique reasoning from each.
-     f. Remove the original overlapping blocks.
-   - Write the updated file back with `squad_state_write`. This handles duplicates and convergent decisions introduced by concurrent agent writes.
+3. **Validate and compact decisions.md:**
+   - The ledger requires ID, timezone-bearing decision time, author, `Status: active`, explicit JSON `Supersedes`, What, and Why.
+   - Do not synthesize/consolidate semantic decisions. The accepting decision owner sets `Supersedes` at write time.
+   - Archived blocks are byte-hash-verified and retrievable through `decision_ledger.py show <ID>`.
 
 4. **Propagate cross-agent updates:**
    For any newly merged decision that affects other agents, append to their `agents/{agent}/history.md` with `squad_state_append`. Replace the parenthetical timestamp with the literal CURRENT_DATETIME value from your spawn prompt; do not write placeholder text.

@@ -23,11 +23,19 @@ After making a decision that affects other team members, write it to:
 
 Format:
 ```
-### {date}: {decision title}
+### D-{stable-id}: {decision title}
+**ID:** D-{stable-id}
+**Decided At:** {ISO-8601 timestamp with timezone}
 **By:** {Your Name}
+**Status:** active
+**Supersedes:** []
 **What:** {the decision}
 **Why:** {rationale}
 ```
+
+The accepting decision owner fills `Supersedes` before submission. Use predecessor IDs for a
+replacement; use `[]` only for a decision intentionally kept live (including foundational
+decisions). Do not write `superseded`; the ledger derives it after validating the graph.
 
 ### Cross-Agent Communication
 If you need another team member's input, say so in your response. The coordinator will bring them in. Don't try to do work outside your domain.
