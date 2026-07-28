@@ -92,7 +92,7 @@ Deployment path:
 4. Check app-tier concurrency: fail closed if three app-tier PR environments are already active.
 5. Authenticate to Azure through GitHub OIDC and the `azure-pr-app` GitHub Environment.
 6. Configure `azd` environment variables, including shared ACR and shared Foundry references.
-7. Run `azd provision`, then `azd deploy`. Do not use `azd up` in CI because provision and deploy need separate logs, gates, and failure handling.
+7. Create the deterministic `rg-<environment-name>` with PR lifecycle tags in the same create request, set `AZURE_RESOURCE_GROUP`, then run `azd provision` and `azd deploy`. Do not use `azd up` in CI because provision and deploy need separate logs, gates, and failure handling.
 8. Run smoke tests against `GET /health/live` and `GET /health/ready`.
 9. Post or update one PR comment containing the app URL, environment name, expiry, health status, and a link to workflow logs.
 
@@ -107,6 +107,7 @@ Janitor path:
 - Tear down expired app-tier PR environments with `azd down --purge` or delete the tagged resource group if `azd` state is unavailable.
 - Do not infer TTL deletion for `environment-type=pr-foundry`: close-time teardown is the deterministic cap-release path for Foundry exceptions, while the janitor surfaces expired or closed-PR `pr-foundry` groups as operator cleanup warnings.
 - Report orphaned or failed deletes as workflow annotations and leave enough non-secret identifiers for Tank to investigate.
+- Also report legacy untagged groups only when their name exactly matches `rg-pr-<number>-<slug>-<hash8>`, their PR is verified closed for at least 24 hours, and it is not active. They require an explicit manual-dispatch deletion opt-in; an untagged name alone is never sufficient.
 
 Workflow concurrency:
 

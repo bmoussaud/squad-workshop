@@ -432,6 +432,46 @@ jobs:
             --location "$AZURE_LOCATION" \
             --no-prompt
 
+      - name: Create and atomically tag PR resource group
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # azd creates `rg-${AZURE_ENV_NAME}` only when AZURE_RESOURCE_GROUP is
+          # unset. Create that deterministic group first with lifecycle tags in
+          # the same ARM create request, then pin azd to it. This removes the
+          # provision-success/tag-failure orphan window without changing Bicep's
+          # resource-group deployment scope.
+          rg="rg-${AZURE_ENV_NAME}"
+          environment_type="pr-app"
+          if [ "${DEPLOY_FOUNDRY}" = "true" ]; then
+            environment_type="pr-foundry"
+          fi
+          created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          expires="$(date -u -d '+7 days' +%Y-%m-%dT%H:%M:%SZ)"
+          exists="$(az group exists --name "$rg" -o tsv)"
+          if [ "$exists" = "true" ]; then
+            # Preserve azd's service tags for a redeploy while refreshing the TTL.
+            rg_id="$(az group show --name "$rg" --query id -o tsv)"
+            az tag update --resource-id "$rg_id" --operation merge --tags \
+              ephemeral=true environment-type="$environment_type" \
+              pr-number="$PR_NUMBER" author="$PR_AUTHOR" created-at="$created" \
+              expires-at="$expires" repo="$BASE_REPO" branch="$HEAD_BRANCH"
+          elif [ "$exists" = "false" ]; then
+            az group create --name "$rg" --location "$AZURE_LOCATION" --tags \
+              ephemeral=true environment-type="$environment_type" \
+              pr-number="$PR_NUMBER" author="$PR_AUTHOR" created-at="$created" \
+              expires-at="$expires" repo="$BASE_REPO" branch="$HEAD_BRANCH" \
+              >/dev/null
+          else
+            echo "::error::Unexpected az group exists result: ${exists}"
+            exit 1
+          fi
+          azd env set AZURE_RESOURCE_GROUP "$rg"
+
       # provision and deploy are SEPARATE steps (never `azd up`): the design
       # requires distinct logs, gates and failure handling for each.
       - name: azd provision

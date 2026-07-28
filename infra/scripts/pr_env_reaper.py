@@ -11,10 +11,11 @@ here does not fail a build -- it destroys someone's environment, or a shared /
 production resource group. The blast radius is exactly why the selection logic
 must be unit-testable in isolation, hermetically, with the clock injected.
 
-## Reaping is strictly ALLOWLIST-based
+## Tagged reaping is strictly ALLOWLIST-based
 
-A group is NEVER reaped by exclusion. A group becomes a reap candidate ONLY when
-it positively proves it is a per-PR ephemeral environment. ALL of these must
+A tagged group is NEVER reaped by exclusion. A tagged group becomes a reap
+candidate ONLY when it positively proves it is a per-PR ephemeral environment.
+ALL of these must
 hold, or the verdict is ``keep``:
 
 * ``tags`` is present AND is an object (not ``null``, not a list), AND
@@ -30,6 +31,13 @@ Anything ambiguous fails toward ``keep``. A malformed tag is NEVER treated as
 ``TypeError`` in Python; that is handled deliberately by rejecting naive
 timestamps before any comparison, so the reaper never crashes on hostile input.
 
+Legacy groups without any lifecycle tags use a separate, deliberately narrower
+path: their name must exactly match the historical PR resource-group convention,
+their PR must be absent from the active list, and GitHub must verify that PR was
+closed for at least 24 hours. The workflow reports those candidates and requires
+an explicit manual-dispatch deletion opt-in. An untagged group is never deleted
+solely because it lacks tags or has a PR-looking name.
+
 ## Reason codes
 
 Reap verdicts:
@@ -39,6 +47,9 @@ Reap verdicts:
 * ``orphaned_closed_pr``  -- valid ephemeral pr-app group whose PR number is in
   ``--closed-pr-numbers`` (a failed close-time teardown -- the exact case the
   janitor exists to catch). Reaped regardless of expiry.
+* ``untagged_orphan_closed_pr`` -- legacy name match with an inactive PR verified
+  closed for at least 24 hours. Reported by default; workflow deletion needs an
+  explicit operator opt-in.
 
 Keep verdicts (every one is a distinct, asserted reason -- see the tests):
 
@@ -63,9 +74,10 @@ from __future__ import annotations
 import argparse
 import enum
 import json
+import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Allow importing the sibling naming module whether this file is imported as a
@@ -88,6 +100,14 @@ EXPIRES_AT_TAG = "expires-at"
 
 EPHEMERAL_TRUE = "true"
 PR_APP_ENVIRONMENT_TYPE = "pr-app"
+UNTAGGED_ORPHAN_MIN_CLOSED_AGE = timedelta(hours=24)
+
+# The only legacy naming convention this reaper recognizes.  A match alone never
+# permits deletion: it merely allows the closed-PR and grace-period checks below.
+PR_RESOURCE_GROUP_NAME_RE = re.compile(
+    r"^rg-pr-(?P<pr_number>[1-9][0-9]*)-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)-"
+    r"(?P<hash>[0-9a-f]{8})$"
+)
 
 
 class Action(enum.Enum):
@@ -102,6 +122,7 @@ class ReapDecision:
     action: Action
     reason_code: str
     pr_number: str | None = None
+    untagged_orphan: bool = False
 
     @property
     def reap(self) -> bool:
@@ -114,6 +135,7 @@ class ReapDecision:
             "action": self.action.value,
             "reason_code": self.reason_code,
             "pr_number": self.pr_number,
+            "untagged_orphan": self.untagged_orphan,
         }
 
 
@@ -121,8 +143,17 @@ def _keep(name: str, location: str, reason_code: str, pr_number: str | None = No
     return ReapDecision(name, location, Action.KEEP, reason_code, pr_number)
 
 
-def _reap(name: str, location: str, reason_code: str, pr_number: str) -> ReapDecision:
-    return ReapDecision(name, location, Action.REAP, reason_code, pr_number)
+def _reap(
+    name: str,
+    location: str,
+    reason_code: str,
+    pr_number: str,
+    *,
+    untagged_orphan: bool = False,
+) -> ReapDecision:
+    return ReapDecision(
+        name, location, Action.REAP, reason_code, pr_number, untagged_orphan
+    )
 
 
 def _tag_str(tags: dict, key: str) -> str | None:
@@ -187,11 +218,74 @@ def parse_closed_pr_numbers(raw: str | None) -> frozenset[int]:
     return frozenset(numbers)
 
 
+def parse_closed_pr_metadata(raw: object) -> dict[int, datetime]:
+    """Parse GitHub's closed-PR JSON into verified number -> closed-at metadata.
+
+    Untagged legacy groups have no trustworthy creation timestamp in ARM's
+    resource-group payload.  The closed PR timestamp is therefore the conservative
+    age source: an untagged name match cannot be reaped until its PR is verified
+    closed for at least 24 hours.  Any malformed API payload fails the janitor
+    rather than silently widening deletion eligibility.
+    """
+    if not isinstance(raw, list):
+        raise ValueError("closed PR metadata must be a JSON array")
+
+    closed: dict[int, datetime] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValueError("closed PR metadata entries must be objects")
+        number = entry.get("number")
+        closed_at = parse_iso8601_utc(entry.get("closedAt"))
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise ValueError("closed PR metadata has an invalid number")
+        if closed_at is None:
+            raise ValueError("closed PR metadata has an invalid closedAt")
+        if number in closed:
+            raise ValueError("closed PR metadata contains a duplicate number")
+        closed[number] = closed_at
+    return closed
+
+
+def _evaluate_untagged_orphan(
+    name: str,
+    location: str,
+    *,
+    now: datetime,
+    active_pr_numbers: frozenset[int],
+    closed_pr_metadata: dict[int, datetime],
+) -> ReapDecision:
+    """Evaluate a legacy no-lifecycle-tag group without trusting its name alone."""
+    match = PR_RESOURCE_GROUP_NAME_RE.fullmatch(name)
+    if match is None:
+        return _keep(name, location, "no_tags")
+
+    pr_number = match.group("pr_number")
+    number = int(pr_number)
+    if number in active_pr_numbers:
+        return _keep(name, location, "untagged_orphan_active_pr", pr_number)
+
+    closed_at = closed_pr_metadata.get(number)
+    if closed_at is None:
+        return _keep(name, location, "untagged_orphan_unverified_pr", pr_number)
+    if closed_at > now or now - closed_at < UNTAGGED_ORPHAN_MIN_CLOSED_AGE:
+        return _keep(name, location, "untagged_orphan_grace_period", pr_number)
+
+    return _reap(
+        name,
+        location,
+        "untagged_orphan_closed_pr",
+        pr_number,
+        untagged_orphan=True,
+    )
+
+
 def evaluate_group(
     group: object,
     *,
     now: datetime,
     closed_pr_numbers: frozenset[int],
+    active_pr_numbers: frozenset[int] = frozenset(),
+    closed_pr_metadata: dict[int, datetime] | None = None,
 ) -> ReapDecision:
     """Evaluate ONE ``az group list`` entry against the allowlist.
 
@@ -210,10 +304,29 @@ def evaluate_group(
     if not name:
         return _keep("", location, "malformed_group")
 
-    # Gate 1: tags must be a real object. ``null`` or a list is NOT an object.
+    # Legacy PR groups created before the workflow applied lifecycle tags can
+    # never satisfy the normal allowlist. They receive a separate, much stricter
+    # proof: exact name convention + no active PR + verified closed age.
     tags = group.get("tags")
     if not isinstance(tags, dict):
-        return _keep(name, location, "no_tags")
+        return _evaluate_untagged_orphan(
+            name,
+            location,
+            now=now,
+            active_pr_numbers=active_pr_numbers,
+            closed_pr_metadata=closed_pr_metadata or {},
+        )
+    if not any(
+        tag in tags
+        for tag in (EPHEMERAL_TAG, ENVIRONMENT_TYPE_TAG, PR_NUMBER_TAG, EXPIRES_AT_TAG)
+    ):
+        return _evaluate_untagged_orphan(
+            name,
+            location,
+            now=now,
+            active_pr_numbers=active_pr_numbers,
+            closed_pr_metadata=closed_pr_metadata or {},
+        )
 
     # Gate 2: ephemeral must be EXACTLY the lowercase string "true".
     if _tag_str(tags, EPHEMERAL_TAG) != EPHEMERAL_TRUE:
@@ -253,9 +366,17 @@ def evaluate_groups(
     *,
     now: datetime,
     closed_pr_numbers: frozenset[int],
+    active_pr_numbers: frozenset[int] = frozenset(),
+    closed_pr_metadata: dict[int, datetime] | None = None,
 ) -> list[ReapDecision]:
     return [
-        evaluate_group(group, now=now, closed_pr_numbers=closed_pr_numbers)
+        evaluate_group(
+            group,
+            now=now,
+            closed_pr_numbers=closed_pr_numbers,
+            active_pr_numbers=active_pr_numbers,
+            closed_pr_metadata=closed_pr_metadata,
+        )
         for group in groups
     ]
 
@@ -269,9 +390,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description=(
             "Decide which per-PR ephemeral Azure resource groups to reap, from a "
             "raw 'az group list' JSON payload and an injected evaluation time. "
-            "Strictly allowlist-based: a group is reaped only when it positively "
-            "proves it is a per-PR ephemeral environment. Performs no Azure "
-            "calls. Exits non-zero only on malformed/unreadable input."
+            "Tagged groups are strictly allowlist-based; legacy untagged groups "
+            "also require an exact name, inactive PR, and verified closed-PR "
+            "grace period. Performs no Azure calls. Exits non-zero only on "
+            "malformed/unreadable input."
         ),
     )
     parser.add_argument(
@@ -288,6 +410,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--closed-pr-numbers",
         default="",
         help="optional comma-separated PR numbers to reap as orphans (e.g. '12,34')",
+    )
+    parser.add_argument(
+        "--active-pr-numbers",
+        default="",
+        help="comma-separated open PR numbers; name-only candidates stay kept when active",
+    )
+    parser.add_argument(
+        "--closed-prs-json",
+        default="",
+        help="path to GitHub closed-PR JSON ({number, closedAt}); required to reap untagged candidates",
     )
     parser.add_argument(
         "--format",
@@ -339,17 +471,40 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     closed = parse_closed_pr_numbers(args.closed_pr_numbers)
-    decisions = evaluate_groups(groups, now=now, closed_pr_numbers=closed)
+    active = parse_closed_pr_numbers(args.active_pr_numbers)
+    closed_metadata: dict[int, datetime] = {}
+    if args.closed_prs_json:
+        try:
+            closed_metadata = parse_closed_pr_metadata(
+                json.loads(Path(args.closed_prs_json).read_text(encoding="utf-8"))
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            return _fail_malformed(f"could not read --closed-prs-json: {error}", args.format)
+    decisions = evaluate_groups(
+        groups,
+        now=now,
+        closed_pr_numbers=closed,
+        active_pr_numbers=active,
+        closed_pr_metadata=closed_metadata,
+    )
     _emit(decisions, args.format)
     return 0
 
 
 def _emit(decisions: list[ReapDecision], output_format: str) -> None:
     reap_names = [_sanitize_log(d.name) for d in decisions if d.reap]
+    tagged_reap_names = [
+        _sanitize_log(d.name) for d in decisions if d.reap and not d.untagged_orphan
+    ]
+    untagged_orphan_names = [
+        _sanitize_log(d.name) for d in decisions if d.reap and d.untagged_orphan
+    ]
     if output_format == "json":
         payload = {
             "reap_count": len(reap_names),
             "reap_names": reap_names,
+            "tagged_reap_names": tagged_reap_names,
+            "untagged_orphan_names": untagged_orphan_names,
             "decisions": [d.printable_fields() for d in decisions],
         }
         print(json.dumps(payload, sort_keys=True))
@@ -358,6 +513,8 @@ def _emit(decisions: list[ReapDecision], output_format: str) -> None:
         # spaces) suitable for a $GITHUB_OUTPUT line the workflow reads back.
         print(f"reap_count={len(reap_names)}")
         print(f"reap_names={' '.join(reap_names)}")
+        print(f"tagged_reap_names={' '.join(tagged_reap_names)}")
+        print(f"untagged_orphan_names={' '.join(untagged_orphan_names)}")
 
 
 if __name__ == "__main__":
