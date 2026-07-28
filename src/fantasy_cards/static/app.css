@@ -1,7 +1,7 @@
 :root {
   --ink: #17251d;
-  --paper: #f7f3e8;
-  --surface: #fffdf7;
+  --paper: #dff3df;
+  --surface: #f4fbf4;
   --forest: #24513a;
   --forest-deep: #173a29;
   --coral: #c84d3f;
@@ -34,7 +34,7 @@ body {
   min-height: 72px;
   padding: 12px clamp(20px, 5vw, 72px);
   border-bottom: 1px solid var(--line);
-  background: rgba(247, 243, 232, 0.96);
+  background: rgba(223, 243, 223, 0.96);
 }
 
 .wordmark {
@@ -85,7 +85,7 @@ body {
 .result {
   display: flex;
   flex-direction: column;
-  background: #edf1e8;
+  background: #d2ead2;
 }
 
 .section-heading,

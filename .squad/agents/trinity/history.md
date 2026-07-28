@@ -54,3 +54,6 @@ Added `infra/scripts/pr_foundry_scope.py` + `tests/test_pr_foundry_scope.py` (16
 📌 Team update (2026-07-28T09:03:21Z): Phase 6 Foundry detection is triage only; keep the exact allowlist/labels narrow, preserve content-aware switch integrity checks, and do not broaden matches without explicit cost-gate rationale — decided by Trinity, Tank, Switch, Rai, Fact Checker.
 ### 2026-07-28T09:57+02:00: Python application status audit
 Read-only status audit of src/fantasy_cards, pyproject.toml, uv.lock, Dockerfile, .devcontainer, package.json, and README commands. No source/infra/app code changes made. Local Python 3.11 could import package and FastAPI app; uv command unavailable in this host, so uv-documented commands are unverified here.
+
+### 2026-07-28T11:22:44+02:00: Green application background (#41)
+Updated the web stylesheet background palette only: --paper #dff3df, --surface #f4fbf4, masthead rgba(223, 243, 223, 0.96), and result #d2ead2. Added a static CSS contract test pinning the green page background and dependent green-family values. Full suite via `python -m uv run python -m unittest discover -s tests`: 278 tests OK.

@@ -68,6 +68,27 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertRegex(compact, r"@media\s*\(max-width:")
         self.assertRegex(compact, r"min-height\s*:\s*(?:44px|48px|2\.75rem|3rem)")
 
+    def test_css_centralizes_green_background_palette(self) -> None:
+        from fastapi.testclient import TestClient
+        from fantasy_cards.web import create_app
+
+        with patch.dict(os.environ, self.environment, clear=True):
+            with TestClient(create_app()) as client:
+                html = client.get("/").text
+                stylesheet_path = re.search(
+                    r'href="(?P<path>/static/[^"]+\.css)"', html
+                ).group("path")
+                css = client.get(stylesheet_path).text.lower()
+
+        self.assertIn("--paper: #dff3df;", css)
+        self.assertIn("--surface: #f4fbf4;", css)
+        self.assertIn("background: var(--paper);", css)
+        self.assertIn("background-color: var(--paper);", css)
+        self.assertIn("background: rgba(223, 243, 223, 0.96);", css)
+        self.assertIn("background: #d2ead2;", css)
+        self.assertNotIn("#f7f3e8", css)
+        self.assertNotIn("rgba(247, 243, 232", css)
+
     def test_javascript_is_progressive_enhancement_not_required_navigation(self) -> None:
         from fastapi.testclient import TestClient
         from fantasy_cards.web import create_app
