@@ -85,7 +85,13 @@ class WebAcceptanceTests(unittest.TestCase):
             "Generated image files are stored in a non-public Azure Blob container. "
             "They are scheduled for lifecycle deletion no sooner than 30 days after "
             "creation; deleted files may remain recoverable for up to seven additional "
-            "days. Artifact URLs do not require sign-in.",
+            "days. Anyone who has an artifact URL can retrieve its image; there is no "
+            "per-user access control.",
+            html,
+        )
+        self.assertIn(
+            "Microsoft Foundry's provider-controlled retention period for "
+            "abuse-monitoring samples is not known to us.",
             html,
         )
         self.assertIn(
