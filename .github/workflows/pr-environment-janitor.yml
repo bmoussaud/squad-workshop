@@ -40,6 +40,11 @@ on:
         description: 'Report what would be reaped without deleting'
         type: boolean
         required: false
+        default: true
+      reap_untagged_orphans:
+        description: 'Delete verified untagged legacy PR resource groups (requires dry_run=false)'
+        type: boolean
+        required: false
         default: false
 
 # Default to read-only; the reap job widens only what it needs.
@@ -70,7 +75,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Collect closed PR numbers (for orphan reaping)
+      - name: Collect PR state (for orphan reaping)
         id: closed
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,26 +88,32 @@ jobs:
           # window. numbers are integers from the API -> a plain comma list.
           nums="$(gh pr list --state closed --limit 200 --json number \
             --jq 'map(.number | tostring) | join(",")')"
+          active_nums="$(gh pr list --state open --limit 200 --json number \
+            --jq 'map(.number | tostring) | join(",")')"
+          gh pr list --state closed --limit 200 --json number,closedAt \
+            > "$RUNNER_TEMP/closed-prs.json"
           echo "Closed PRs (recent 200): ${nums}"
+          echo "Open PRs (recent 200): ${active_nums}"
           echo "closed_prs=${nums}" >> "$GITHUB_OUTPUT"
+          echo "active_prs=${active_nums}" >> "$GITHUB_OUTPUT"
 
       - name: Evaluate reap set (reaper is authoritative)
         id: reap
         env:
           CLOSED_PRS: ${{ steps.closed.outputs.closed_prs }}
+          ACTIVE_PRS: ${{ steps.closed.outputs.active_prs }}
         run: |
           set -euo pipefail
           # --now is injected EXPLICITLY; nothing reads an implicit clock.
           NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           echo "now=${NOW}"
 
-          # First-pass, server-side candidate FILTER only (not the decision):
-          # narrow to ephemeral pr-app groups so we do not stream the whole
-          # subscription through the reaper. The authoritative reap/keep verdict
-          # is still made by the reaper below.
-          candidates="$(az group list \
-            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app']" \
-            -o json)"
+          # The reaper's tagged path is an allowlist, while its legacy path needs
+          # to see untagged groups. Stream the complete RG inventory into the
+          # tested decision engine rather than approximating a delete predicate in
+          # JMESPath. Name-only candidates still require an inactive, verified
+          # closed PR and a 24-hour grace period before they are merely reported.
+          candidates="$(az group list -o json)"
 
           # The reaper consumes the raw `az group list` JSON (name/location/tags),
           # decides reap-or-keep per group with a reason_code, and with
@@ -112,6 +123,8 @@ jobs:
             --groups-json - \
             --now "${NOW}" \
             --closed-pr-numbers "${CLOSED_PRS}" \
+            --active-pr-numbers "${ACTIVE_PRS}" \
+            --closed-prs-json "$RUNNER_TEMP/closed-prs.json" \
             --format env)"
           printf '%s\n' "${reap_out}"
           printf '%s\n' "${reap_out}" >> "$GITHUB_OUTPUT"
@@ -188,11 +201,34 @@ jobs:
                   summary.write(f"| `{name}` | `{pr_number}` | `{expires_at}` | `{reason}` |\n")
           PY
 
-      - name: Delete reaped groups (only what the reaper named)
+      - name: Report verified untagged orphan candidates
+        env:
+          UNTAGGED_ORPHAN_NAMES: ${{ steps.reap.outputs.untagged_orphan_names }}
+        run: |
+          set -euo pipefail
+          names="$(printf '%s' "${UNTAGGED_ORPHAN_NAMES:-}" | tr ',' ' ')"
+          if [ -z "$(printf '%s' "${names}" | tr -d '[:space:]')" ]; then
+            echo "No verified untagged orphan candidates."
+            exit 0
+          fi
+          {
+            echo "## Untagged PR environment orphan review"
+            echo
+            echo "These names match the legacy PR convention, have no lifecycle tags, and belong to PRs closed for at least 24 hours. They are **not deleted automatically**."
+            echo
+            for rg in ${names}; do
+              echo "- \`${rg}\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          for rg in ${names}; do
+            echo "::warning::Verified untagged PR environment orphan requires explicit cleanup: ${rg}"
+          done
+
+      - name: Delete tagged reaped groups (only what the reaper named)
         env:
           # Reaper output (constrained Azure RG names), passed via env and read
           # as a quoted variable -- never interpolated into the script body.
-          REAP_NAMES: ${{ steps.reap.outputs.reap_names }}
+          REAP_NAMES: ${{ steps.reap.outputs.tagged_reap_names }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
           set -uo pipefail
@@ -234,3 +270,38 @@ jobs:
             exit 1
           fi
           echo "Janitor complete; all reaped groups deleted."
+
+      - name: Delete verified untagged orphan groups
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reap_untagged_orphans == true }}
+        env:
+          REAP_NAMES: ${{ steps.reap.outputs.untagged_orphan_names }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -uo pipefail
+          names="$(printf '%s' "${REAP_NAMES:-}" | tr ',' ' ')"
+          if [ -z "$(printf '%s' "${names}" | tr -d '[:space:]')" ]; then
+            echo "No verified untagged orphan groups selected."
+            exit 0
+          fi
+          if [ "${DRY_RUN:-true}" = "true" ]; then
+            for rg in ${names}; do
+              echo "::notice::[dry-run] would reap verified untagged orphan ${rg}"
+            done
+            exit 0
+          fi
+          failed=""
+          for rg in ${names}; do
+            echo "Reaping verified untagged orphan resource group ${rg}"
+            if az group delete --name "${rg}" --yes; then
+              echo "::notice::Reaped ${rg}"
+            elif az group show --name "${rg}" >/dev/null 2>&1; then
+              echo "::error::Failed to delete resource group ${rg}"
+              failed="${failed} ${rg}"
+            else
+              echo "Resource group ${rg} already gone; treating as success."
+            fi
+          done
+          if [ -n "${failed}" ]; then
+            echo "::error::Janitor failed to delete:${failed}"
+            exit 1
+          fi

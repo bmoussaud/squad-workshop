@@ -84,8 +84,20 @@ def _group(
     return {"name": name, "location": location, "tags": built}
 
 
-def _decide(group: dict, *, closed: frozenset[int] = frozenset()) -> "reaper.ReapDecision":
-    return reaper.evaluate_group(group, now=NOW, closed_pr_numbers=closed)
+def _decide(
+    group: dict,
+    *,
+    closed: frozenset[int] = frozenset(),
+    active: frozenset[int] = frozenset(),
+    closed_metadata: dict[int, datetime] | None = None,
+) -> "reaper.ReapDecision":
+    return reaper.evaluate_group(
+        group,
+        now=NOW,
+        closed_pr_numbers=closed,
+        active_pr_numbers=active,
+        closed_pr_metadata=closed_metadata,
+    )
 
 
 class ReapPositivePathTests(unittest.TestCase):
@@ -133,12 +145,12 @@ class AllowlistConditionTests(unittest.TestCase):
     def test_tags_null_is_kept(self) -> None:
         decision = _decide(_group(tags=None))
         self.assertFalse(decision.reap)
-        self.assertEqual(decision.reason_code, "no_tags")
+        self.assertEqual(decision.reason_code, "untagged_orphan_unverified_pr")
 
     def test_tags_as_list_is_kept(self) -> None:
         decision = _decide(_group(tags=["ephemeral=true"]))
         self.assertFalse(decision.reap)
-        self.assertEqual(decision.reason_code, "no_tags")
+        self.assertEqual(decision.reason_code, "untagged_orphan_unverified_pr")
 
     def test_missing_ephemeral_tag_is_kept(self) -> None:
         decision = _decide(_group(ephemeral=None))
@@ -271,7 +283,7 @@ class SharedAndProductionSafetyTests(unittest.TestCase):
         # Carries none of the pr-app allowlist tags, so it is rejected at the
         # first gate it fails -- proving a refactor that loosens the filter and
         # lets this shared group through would break this test.
-        self.assertEqual(decision.reason_code, "not_ephemeral")
+        self.assertEqual(decision.reason_code, "no_tags")
 
     def test_shared_foundry_group_is_never_reaped(self) -> None:
         shared_foundry = {
@@ -294,12 +306,71 @@ class SharedAndProductionSafetyTests(unittest.TestCase):
         self.assertEqual(decision.reason_code, "no_tags")
 
     def test_group_named_like_a_pr_env_but_untagged_is_kept(self) -> None:
-        # Reaping is allowlist-based, NEVER name-based: a group whose NAME looks
-        # like a PR env but carries no tags must be kept.
+        # A legacy-looking name alone is never sufficient: without verified PR
+        # closure metadata, the candidate remains kept.
         look_alike = {"name": "rg-pr-14-render-card-layout-deadbeef", "tags": None}
         decision = _decide(look_alike)
         self.assertFalse(decision.reap)
+        self.assertEqual(decision.reason_code, "untagged_orphan_unverified_pr")
+
+
+class UntaggedOrphanSafetyTests(unittest.TestCase):
+    """Legacy untagged candidates need stricter proof than normal TTL groups."""
+
+    LEGACY_NAME = "rg-pr-45-change-application-background-color-to-green-1a64a29b"
+
+    def test_verified_closed_legacy_group_is_selected_after_grace_period(self) -> None:
+        decision = _decide(
+            {"name": self.LEGACY_NAME, "location": "francecentral", "tags": None},
+            closed_metadata={45: datetime(2026, 7, 26, 20, 0, tzinfo=timezone.utc)},
+        )
+        self.assertTrue(decision.reap)
+        self.assertTrue(decision.untagged_orphan)
+        self.assertEqual(decision.reason_code, "untagged_orphan_closed_pr")
+
+    def test_active_pr_prevents_legacy_name_reaping(self) -> None:
+        decision = _decide(
+            {"name": self.LEGACY_NAME, "tags": None},
+            active=frozenset({45}),
+            closed_metadata={45: datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)},
+        )
+        self.assertFalse(decision.reap)
+        self.assertEqual(decision.reason_code, "untagged_orphan_active_pr")
+
+    def test_recently_closed_pr_stays_in_grace_period(self) -> None:
+        decision = _decide(
+            {"name": self.LEGACY_NAME, "tags": None},
+            closed_metadata={45: datetime(2026, 7, 27, 22, 0, tzinfo=timezone.utc)},
+        )
+        self.assertFalse(decision.reap)
+        self.assertEqual(decision.reason_code, "untagged_orphan_grace_period")
+
+    def test_nonmatching_untagged_name_is_never_reaped(self) -> None:
+        decision = _decide(
+            {"name": "rg-fantasy-cards-dev-8f327f8c", "tags": None},
+            closed_metadata={45: datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)},
+        )
+        self.assertFalse(decision.reap)
         self.assertEqual(decision.reason_code, "no_tags")
+
+    def test_shared_acr_name_is_never_reaped(self) -> None:
+        decision = _decide(
+            {"name": "acrfantasycardsnrp2z4rl3jd32", "tags": None},
+            closed_metadata={45: datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)},
+        )
+        self.assertFalse(decision.reap)
+        self.assertEqual(decision.reason_code, "no_tags")
+
+    def test_partial_lifecycle_tags_do_not_use_untagged_fallback(self) -> None:
+        decision = _decide(
+            {
+                "name": self.LEGACY_NAME,
+                "tags": {"ephemeral": "true"},
+            },
+            closed_metadata={45: datetime(2026, 7, 20, 20, 0, tzinfo=timezone.utc)},
+        )
+        self.assertFalse(decision.reap)
+        self.assertEqual(decision.reason_code, "wrong_environment_type")
 
 
 class MalformedGroupShapeTests(unittest.TestCase):
@@ -339,6 +410,21 @@ class ClosedPrParsingTests(unittest.TestCase):
         decision = _decide(_group(pr_number="014", expires_at=FUTURE), closed=frozenset({14}))
         self.assertTrue(decision.reap)
         self.assertEqual(decision.reason_code, "orphaned_closed_pr")
+
+    def test_closed_pr_metadata_requires_numeric_number_and_aware_closed_at(self) -> None:
+        parsed = reaper.parse_closed_pr_metadata(
+            [{"number": 45, "closedAt": "2026-07-20T21:00:00Z"}]
+        )
+        self.assertEqual(parsed, {45: datetime(2026, 7, 20, 21, tzinfo=timezone.utc)})
+        for malformed in (
+            [{"number": "45", "closedAt": "2026-07-20T21:00:00Z"}],
+            [{"number": 45, "closedAt": "2026-07-20T21:00:00"}],
+            [{"number": 45, "closedAt": None}],
+            [{"number": 45, "closedAt": "2026-07-20T21:00:00Z"}] * 2,
+        ):
+            with self.subTest(malformed=malformed):
+                with self.assertRaises(ValueError):
+                    reaper.parse_closed_pr_metadata(malformed)
 
     def test_unrelated_closed_pr_does_not_reap_a_live_env(self) -> None:
         decision = _decide(_group(expires_at=FUTURE), closed=frozenset({999}))
@@ -394,6 +480,8 @@ class ReaperCliTests(unittest.TestCase):
         payload = json.loads(stdout)
         self.assertEqual(payload["reap_count"], 1)
         self.assertEqual(payload["reap_names"], ["rg-pr-14-expired"])
+        self.assertEqual(payload["tagged_reap_names"], ["rg-pr-14-expired"])
+        self.assertEqual(payload["untagged_orphan_names"], [])
         self.assertEqual(len(payload["decisions"]), 3)
         by_name = {d["name"]: d for d in payload["decisions"]}
         self.assertEqual(by_name["rg-pr-14-expired"]["action"], "reap")
@@ -487,8 +575,8 @@ class OutputSafetyTests(unittest.TestCase):
         groups = [_group(name="rg-pr-14-x\n::error::pwn\r", expires_at=PAST)]
         code, stdout = _run(groups, fmt="env")
         self.assertEqual(code, 0)
-        # reap_count + reap_names => exactly two lines; injection would add more.
-        self.assertEqual(len([ln for ln in stdout.splitlines() if ln]), 2)
+        # Four fixed output lines; injection must not add a fifth.
+        self.assertEqual(len([ln for ln in stdout.splitlines() if ln]), 4)
         self.assertNotIn("::error::pwn", stdout.split("reap_names=", 1)[0])
 
     def test_json_output_has_no_raw_control_characters(self) -> None:
