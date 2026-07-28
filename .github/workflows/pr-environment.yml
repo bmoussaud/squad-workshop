@@ -118,6 +118,7 @@ jobs:
           # in the deploy job AFTER OIDC login. It cannot be used to bypass the
           # cap because the post-login recheck re-runs pr_preflight with the real
           # count and fails the run on BLOCKED.
+          set +e
           output="$(python3 infra/scripts/pr_preflight.py \
             --repo "$BASE_REPO" \
             --pr-number "$PR_NUMBER" \
@@ -131,11 +132,18 @@ jobs:
             --requires-foundry "$REQUIRES_FOUNDRY" \
             --foundry-authorized false \
             --active-foundry-env-count 0 \
-            --format env)"
+            --format env 2>&1)"
+          rc=$?
+          set -e
           printf '%s\n' "$output"
+          if [ "$rc" -ne 0 ] && ! printf '%s\n' "$output" | grep -qx 'decision=blocked'; then
+            echo "::error::Preflight command failed before emitting a BLOCKED verdict (exit ${rc})."
+            exit "$rc"
+          fi
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
-          # Never fail here: the enforce step below turns a BLOCKED verdict into a
-          # visible run failure, while a SKIP (draft) exits cleanly.
+          # Never fail here for a valid BLOCKED verdict: the enforce step below
+          # turns policy refusal into a visible run failure, while a SKIP (draft)
+          # exits cleanly.
 
       - name: Enforce verdict (BLOCKED fails the run, SKIP does not)
         if: steps.gate.outputs.decision == 'blocked' && steps.gate.outputs.reason_code != 'foundry_unauthorized'
@@ -344,6 +352,7 @@ jobs:
           fi
           # Authoritative cap check via pr_preflight (fails closed at 3). BLOCKED
           # -> non-zero exit -> the run fails before we provision anything.
+          set +e
           output="$(python3 infra/scripts/pr_preflight.py \
             --repo "$BASE_REPO" \
             --pr-number "$PR_NUMBER" \
@@ -357,8 +366,9 @@ jobs:
             --requires-foundry "$REQUIRES_FOUNDRY" \
             --foundry-authorized "$FOUNDRY_AUTHORIZED" \
             --active-foundry-env-count "$active_foundry" \
-            --format env)"
+            --format env 2>&1)"
           rc=$?
+          set -e
           printf '%s\n' "$output"
           if [ "$rc" -ne 0 ]; then
             echo "::error::App-tier concurrency cap or safety check failed; refusing to provision."
@@ -501,11 +511,13 @@ jobs:
           # The URL is an Azure-issued FQDN (not attacker input); still passed
           # via env for consistency. Non-zero exit (smoke failure) fails the run;
           # the comment job still posts the failing status via always().
+          set +e
           output="$(python3 infra/scripts/pr_smoke_test.py \
             --base-url "$APP_URL" \
             --deadline-seconds 180 \
-            --format env)"
+            --format env 2>&1)"
           rc=$?
+          set -e
           printf '%s\n' "$output"
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
           exit $rc
