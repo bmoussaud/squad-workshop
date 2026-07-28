@@ -57,6 +57,12 @@ MANAGED_IDENTITY_MAX = 128
 APPLICATION_INSIGHTS_MAX = 260
 ACTION_GROUP_MAX = 260
 BUDGET_MAX = 63
+# Log Analytics workspace name: length 4-63, alphanumerics and hyphens only,
+# must start and end with an alphanumeric character. Uniqueness is scoped to the
+# resource group (not global). Our compacted names use only ``[a-z0-9-]`` and
+# always start with ``pr`` and end with the hex ``hash8``, so they satisfy the
+# start/end-alphanumeric rule; we enforce the length ceiling via ``_compact_or_full``.
+LOG_ANALYTICS_MAX = 63
 ACR_MIN = 5
 ACR_MAX = 50
 # Virtual Network name: length 2-64, alphanumerics, hyphens, underscores and
@@ -308,6 +314,7 @@ BICEPPARAM_ENV_VARS: dict[str, str] = {
     "managed_environment": "CONTAINER_APPS_ENVIRONMENT_NAME",
     "virtual_network": "VIRTUAL_NETWORK_NAME",
     "application_insights": "APPLICATION_INSIGHTS_NAME",
+    "log_analytics": "LOG_ANALYTICS_WORKSPACE_NAME",
 }
 
 
@@ -330,6 +337,7 @@ class PrEnvironmentNames:
     virtual_network: str
     managed_identity: str
     application_insights: str
+    log_analytics: str
     action_group: str
     budget: str
 
@@ -360,6 +368,7 @@ class PrEnvironmentNames:
             "virtual_network": self.virtual_network,
             "managed_identity": self.managed_identity,
             "application_insights": self.application_insights,
+            "log_analytics": self.log_analytics,
             "action_group": self.action_group,
             "budget": self.budget,
         }
@@ -395,6 +404,7 @@ def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
         application_insights=_compact_or_full(
             env, APPLICATION_INSIGHTS_MAX, pr_number, digest
         ),
+        log_analytics=_compact_or_full(env, LOG_ANALYTICS_MAX, pr_number, digest),
         action_group=_compact_or_full(env, ACTION_GROUP_MAX, pr_number, digest),
         budget=_compact_or_full(env, BUDGET_MAX, pr_number, digest),
     )
