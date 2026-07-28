@@ -10,8 +10,10 @@ branch): the ``azd`` environment name is ``pr-{number}-{slug[:N]}-{hash8}`` wher
 
 * ``number`` is the GitHub PR number,
 * ``slug`` is the sanitized and, when needed, display-truncated slug derived from
-  the stable branch convention ``squad/{issue}-{slug}`` (lowercase letters,
-  digits, hyphens; collapsed separators; trimmed), and
+  the stable branch convention ``squad/{issue}-{slug}``, or the equivalent
+  owner-prefixed, slash-flattened Copilot App branch form
+  ``{owner}-squad-{issue}-{slug}`` (lowercase letters, digits, hyphens;
+  collapsed separators; trimmed), and
 * ``hash8`` is the first 8 lowercase hex chars of
   ``sha256("{repo}|{prNumber}|{slug}")``.
 
@@ -90,7 +92,10 @@ MANAGED_ENVIRONMENT_DEFENSIVE_MAX = 32
 # Compact fixed application prefix used inside per-resource names.
 APP_PREFIX = "fc"
 
-_BRANCH_RE = re.compile(r"^squad/(?P<issue>[1-9][0-9]*)-(?P<slug>.+)$")
+_BRANCH_RE = re.compile(
+    r"^(?:(?P<owner>[a-z0-9][a-z0-9-]*)-)?"
+    r"squad(?:/|-)(?P<issue>[1-9][0-9]*)-(?P<slug>.+)$"
+)
 _SLUG_ALLOWED_RE = re.compile(r"[^a-z0-9-]+")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
 _ACR_RE = re.compile(r"^[a-zA-Z0-9]+$")
@@ -117,7 +122,12 @@ def _sanitize_log(text: str) -> str:
 
 
 def slug_from_branch(branch: str) -> str:
-    """Extract and sanitize the meaningful slug from a ``squad/{issue}-{slug}`` branch.
+    """Extract and sanitize the meaningful slug from a supported Squad branch.
+
+    The canonical form is ``squad/{issue}-{slug}``. Copilot App's
+    ``rename_branch`` tool prepends the owner and replaces the slash with a
+    hyphen, so its equivalent ``{owner}-squad-{issue}-{slug}`` form is accepted
+    as well.
 
     Raises ``ValueError`` for any branch that does not follow the convention or
     that yields an empty slug after sanitization.
@@ -128,7 +138,7 @@ def slug_from_branch(branch: str) -> str:
     if match is None:
         raise ValueError(
             f"branch {branch!r} does not follow the required "
-            "'squad/{issue}-{slug}' convention"
+            "'squad/{issue}-{slug}' or '{owner}-squad-{issue}-{slug}' convention"
         )
     return sanitize_slug(match.group("slug"))
 

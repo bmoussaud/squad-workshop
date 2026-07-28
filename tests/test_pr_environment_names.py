@@ -49,6 +49,12 @@ class SlugExtractionTests(unittest.TestCase):
             "render-card-layout",
         )
 
+    def test_extracts_slug_from_copilot_app_branch(self) -> None:
+        self.assertEqual(
+            naming.slug_from_branch("bmoussaud-squad-14-render-card-layout"),
+            "render-card-layout",
+        )
+
     def test_sanitizes_uppercase_and_separators(self) -> None:
         self.assertEqual(
             naming.slug_from_branch("squad/7-Fix__Login  Validation--Now"),
