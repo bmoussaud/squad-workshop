@@ -26,3 +26,7 @@
 📌 Team update (2026-07-27T09:42:54.356+02:00): Per-PR ephemeral Azure environment design includes a gated post-deploy live-Foundry validation hook for sanitized image-generation evidence, tied to issue #4 and the issue #11 card-layout follow-up. — decided by Morpheus, Tank
 
 📌 Team update (2026-07-27T14:44:52+02:00): Stale branch `bmoussaud-neo-investigating-artifact-bug` was cleaned up after verifying the relevant fix/9 content was already squash-merged on main as `0775c47`. Squash-merge SHA divergence can create phantom `N commits ahead` branches even when the tree is integrated; compare trees before rebasing or merging stale work. — recorded by Scribe
+
+📌 Team update (2026-07-28T10:05:06+02:00): Benoit Moussaud (Product Owner) approved the Foundry stack for development only. Neo must carry forward #37: production requires a user-facing notice before release. Production also remains gated on #36 retention/deletion policy, #38 likeness/IP/minors policy, and #39 revalidate GlobalStandard routing; #39 may invalidate the EU-only assumption behind the approval.
+
+📌 Team update (2026-07-28T10:14:07+02:00): Issue #37 scope changed. The user-facing notice must state that inference processing may occur outside the EU under GlobalStandard; any EU-only wording is factually wrong. Artifacts/storage remain in France Central/customer-designated storage. — decided by Benoit Moussaud
