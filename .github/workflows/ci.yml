@@ -19,7 +19,6 @@ jobs:
           BODY: ${{ github.event.pull_request.body }}
         run: |
           branch="$BRANCH"
-          body="$BODY"
 
           # squad/{issue-number}-{kebab-case-slug} is a convention, not a gate:
           # the Copilot app generates worktree branch names (e.g. bmoussaud-musical-spork)
@@ -31,8 +30,131 @@ jobs:
             echo "::notice::Branch '$branch' does not follow the squad/{issue-number}-{kebab-case-slug} convention; skipping the branch-to-issue cross-check."
           fi
 
-          # Hard gate: the PR body must close exactly one issue.
-          mapfile -t referenced_issues < <(grep -Eio '\b(closes|fixes|resolves)[[:space:]]+#[1-9][0-9]*\b' <<< "$body" | grep -Eo '[1-9][0-9]*' || true)
+          # Hard gate: the PR body must close exactly one top-level issue.
+          # BODY stays environment-backed because it is attacker-controlled.
+          mapfile -t referenced_issues < <(python3 - <<'PY'
+          import os
+          import re
+
+
+          CLOSING_REFERENCE = re.compile(
+              r"\b(?:closes|fixes|resolves)\s+#([1-9][0-9]*)\b",
+              re.IGNORECASE,
+          )
+          FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+          BLOCKQUOTE = re.compile(r"^ {0,3}>")
+          INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
+
+
+          def mask(value):
+              return re.sub(r"[^\r\n]", " ", value)
+
+
+          def is_fence_close(line, fence_character, fence_length):
+              candidate = line.rstrip("\r\n")
+              indentation = len(candidate) - len(candidate.lstrip(" "))
+              if indentation > 3:
+                  return False
+              candidate = candidate[indentation:]
+              if not candidate.startswith(fence_character * fence_length):
+                  return False
+              run_length = len(candidate) - len(candidate.lstrip(fence_character))
+              return run_length >= fence_length and candidate[run_length:].strip() == ""
+
+
+          def is_table_separator(line):
+              candidate = line.strip()
+              if "|" not in candidate:
+                  return False
+              cells = candidate.strip("|").split("|")
+              return bool(cells) and all(
+                  re.fullmatch(r"\s*:?-{3,}:?\s*", cell) for cell in cells
+              )
+
+
+          def mask_blocks(body):
+              lines = body.splitlines(keepends=True)
+              masked_lines = []
+              fence = None
+              index = 0
+              while index < len(lines):
+                  line = lines[index]
+                  if fence is not None:
+                      masked_lines.append(mask(line))
+                      if is_fence_close(line, *fence):
+                          fence = None
+                      index += 1
+                      continue
+
+                  fence_match = FENCE_OPEN.match(line)
+                  if fence_match is not None:
+                      opening = fence_match.group(1)
+                      fence = (opening[0], len(opening))
+                      masked_lines.append(mask(line))
+                      index += 1
+                      continue
+
+                  if INDENTED_CODE.match(line) or BLOCKQUOTE.match(line):
+                      masked_lines.append(mask(line))
+                      index += 1
+                      continue
+
+                  if (
+                      index + 1 < len(lines)
+                      and "|" in line
+                      and is_table_separator(lines[index + 1])
+                  ):
+                      masked_lines.extend((mask(line), mask(lines[index + 1])))
+                      index += 2
+                      while index < len(lines) and "|" in lines[index] and lines[index].strip():
+                          masked_lines.append(mask(lines[index]))
+                          index += 1
+                      continue
+
+                  masked_lines.append(line)
+                  index += 1
+              return "".join(masked_lines)
+
+
+          def mask_code_spans(body):
+              masked = list(body)
+              index = 0
+              while index < len(body):
+                  if body[index] != "`":
+                      index += 1
+                      continue
+                  opener_end = index
+                  while opener_end < len(body) and body[opener_end] == "`":
+                      opener_end += 1
+                  delimiter_length = opener_end - index
+                  cursor = opener_end
+                  while cursor < len(body):
+                      if body[cursor] != "`":
+                          cursor += 1
+                          continue
+                      closer_end = cursor
+                      while closer_end < len(body) and body[closer_end] == "`":
+                          closer_end += 1
+                      if closer_end - cursor == delimiter_length:
+                          for position in range(index, closer_end):
+                              if masked[position] not in "\r\n":
+                                  masked[position] = " "
+                          index = closer_end
+                          break
+                      cursor = closer_end
+                  else:
+                      index = opener_end
+              return "".join(masked)
+
+
+          seen = set()
+          for match in CLOSING_REFERENCE.finditer(mask_code_spans(mask_blocks(os.environ.get("BODY", "")))):
+              issue = match.group(1)
+              if issue not in seen:
+                  seen.add(issue)
+                  print(issue)
+          PY
+          )
 
           if [[ "${#referenced_issues[@]}" -ne 1 ]]; then
             echo "Pull requests must close exactly one issue (use a closing keyword such as 'Closes #123' in the body)."
