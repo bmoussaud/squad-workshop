@@ -189,6 +189,28 @@ class BicepparamContractTests(unittest.TestCase):
             },
         )
 
+    def test_every_env_var_is_read_by_main_bicepparam(self) -> None:
+        # The workflow's authoritative "Compute names" step exports exactly the
+        # BICEPPARAM_ENV_VARS values via ``--format envvars``; the dedicated
+        # "Export per-PR observability names" step was removed (commit 6cba275)
+        # precisely because this envvars contract is the single path. That makes
+        # the dict<->bicepparam wiring load-bearing: if main.bicepparam stops
+        # reading one of these names, the PR-safe value silently never reaches
+        # Bicep and the resource falls back to the hardcoded dev default (a
+        # cross-PR collision). Nothing else pins this, so pin it here against the
+        # real file with a literal read expression per env-var name.
+        bicepparam = (SCRIPTS_DIR.parent / "main.bicepparam").read_text(
+            encoding="utf-8"
+        )
+        for field, env_var in naming.BICEPPARAM_ENV_VARS.items():
+            self.assertIn(
+                f"readEnvironmentVariable('{env_var}'",
+                bicepparam,
+                f"{field} -> {env_var} is exported by the naming step but never "
+                "read by infra/main.bicepparam; the PR-safe name will not reach "
+                "Bicep and the dev default will be used",
+            )
+
     def test_envvars_format_emits_bicepparam_names(self) -> None:
         import io
         from contextlib import redirect_stdout
