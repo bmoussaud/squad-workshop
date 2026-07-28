@@ -290,7 +290,6 @@ Detector contract: `requires:foundry` is the explicit opt-in label for the Found
 Testing/review outcome: Switch approved with changes after mutation testing caught 11/11 requested mutations, including exact/case-sensitive path matching, literal label matching, and the preflight gate-order invariant. Rai moved from 🔴 RED twice to 🟡 YELLOW after deploy-time integrity checks and trusted-context job guards were added. Fact Checker verified the fork-OIDC path stops at GitHub's read-only fork token/no `id-token` elevation boundary, making the prior finding defense-in-depth rather than live credential exfiltration.
 **Why:** Foundry/model provisioning is scarce and billable, so approval must be the only provisioning authority. PR-controlled detection can help route review but cannot enforce cost/security boundaries. Trusted job-level guards, fail-closed `DEPLOY_FOUNDRY=false`, deploy-time IaC switch integrity checks, explicit close-time teardown, and pinned tests make the remaining Phase 6 behavior intentional and reviewable.
 
-
 ### 2026-07-28: Keep PR-environment branch convention, surface blocked diagnostics
 **By:** Tank
 **What:** PR Azure Environment still requires branches that feed ephemeral Azure naming to match `squad/{issue}-{slug}`; workflow helper commands now capture and print non-zero diagnostic output before enforcing failures.
@@ -359,3 +358,28 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **By:** Trinity
 **What:** Use `--paper: #dff3df` for the page background, `--surface: #f4fbf4` for the workspace, `rgba(223, 243, 223, 0.96)` for the masthead, and `#d2ead2` for the result pane.
 **Why:** Product only specified the page green; these dependent values replace paper-matched warm neutrals with a coherent light green family while preserving readable contrast with existing text colors.
+
+### 2026-07-28: PR environments use Consumption profile without dedicated capacity bounds
+**By:** Tank
+**What:** The Container Apps templates now map `workloadProfileType == 'Consumption'` to the built-in `Consumption` workload profile and omit dedicated `minimumCount`/`maximumCount`; non-Consumption profiles still use the `dedicated` profile with explicit bounds.
+**Why:** PR workflow sets min count `0` deliberately for scale-to-zero cost control. ARM validates dedicated profile minimum counts as `>= 1`; using the Consumption profile preserves the PR cost intent instead of forcing always-on dedicated nodes.
+
+### 2026-07-28: Bound PR AZURE_ENV_NAME for ARM deployment-name safety
+**By:** Tank
+**What:** `AZURE_ENV_NAME` for PR environments is capped at 40 characters while retaining `pr-{number}-` and the existing `hash8`; only the displayed slug token is truncated.
+**Why:** ARM nested deployment names are limited to 64 chars. The longest module-name prefix currently present in `infra/` is `private-virtual-network-` (24 chars), so the shared environment token must be ≤40 chars to keep every `{module-prefix}-{AZURE_ENV_NAME}` deployment name valid.
+**Scope:** The shared `pr_environment_names.py` helper is authoritative for preflight and deploy. Teardown and janitor remain tag-scoped by `pr-number` and do not derive resource names independently.
+
+### 2026-07-28: Compact PR nested deployment names
+**By:** Tank
+**What:** Nested Bicep module deployment names use the compact PR Container Apps environment token when present instead of the full `AZURE_ENV_NAME`.
+**Why:** ARM deployment names are capped at 64 chars; long PR slugs can fit Azure resource names via the naming module but still overflow nested deployment names when prefixed (`foundry-...`).
+
+**Update:** The same 64-character ARM deployment-name cap also applies to child modules inside `foundry.bicep`. Foundry internals now use a deterministic compact `uniqueString` token for module deployment operation names; resource names are unchanged.
+
+**Status:** Historical interim mitigation, superseded by the root-cause `AZURE_ENV_NAME` 40-character budget. Keep the 64-character module-deployment regression test as the durable guardrail.
+
+### 2026-07-28: Add immutable GitHub OIDC credential for PR Azure environment
+**By:** Tank
+**What:** Added Entra federated credential `github-pr-app-environment-immutable` on `squad-workshop-pr-envs` for exact subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`.
+**Why:** The repo uses GitHub's immutable OIDC subject format; the only existing credential was legacy `repo:bmoussaud/squad-workshop:environment:azure-pr-app`, causing AADSTS700213 in deploy, teardown, and janitor jobs using `azure-pr-app`.
