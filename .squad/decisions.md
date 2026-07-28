@@ -290,6 +290,17 @@ Detector contract: `requires:foundry` is the explicit opt-in label for the Found
 Testing/review outcome: Switch approved with changes after mutation testing caught 11/11 requested mutations, including exact/case-sensitive path matching, literal label matching, and the preflight gate-order invariant. Rai moved from 🔴 RED twice to 🟡 YELLOW after deploy-time integrity checks and trusted-context job guards were added. Fact Checker verified the fork-OIDC path stops at GitHub's read-only fork token/no `id-token` elevation boundary, making the prior finding defense-in-depth rather than live credential exfiltration.
 **Why:** Foundry/model provisioning is scarce and billable, so approval must be the only provisioning authority. PR-controlled detection can help route review but cannot enforce cost/security boundaries. Trusted job-level guards, fail-closed `DEPLOY_FOUNDRY=false`, deploy-time IaC switch integrity checks, explicit close-time teardown, and pinned tests make the remaining Phase 6 behavior intentional and reviewable.
 
+
+### 2026-07-28: Keep PR-environment branch convention, surface blocked diagnostics
+**By:** Tank
+**What:** PR Azure Environment still requires branches that feed ephemeral Azure naming to match `squad/{issue}-{slug}`; workflow helper commands now capture and print non-zero diagnostic output before enforcing failures.
+**Why:** `pr_preflight.py` exit 3 is a valid policy BLOCKED verdict, not a crash. Printing the verdict preserves the gate while making branch-name and cap failures self-diagnosing in Actions logs.
+
+### 2026-07-28T12:01:41+02:00: PR Azure OIDC subject must use immutable owner/repository IDs (consolidated)
+**By:** Tank, Fact Checker
+**What:** The `azure-pr-app` Entra federated credential for this repository must match GitHub's emitted immutable subject exactly: `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`. PR #45 deploy and PR #44 teardown failures are Azure-side OIDC federation mismatches, not PR content or branch-derived behavior.
+**Why:** Azure login fails before any provision/delete operation with AADSTS700213 when Entra cannot find an exact issuer/audience/subject match. Fact Checker verified the ID-qualified subject is expected for this repository because it was created after GitHub's 2026-07-15 immutable OIDC subject change; GitHub's OIDC customization API reports the same default `sub_claim_prefix`, and the subject was stable across observed runs. Do not broaden the credential; match the emitted subject case-sensitively.
+
 ## Governance
 
 - All meaningful changes require team consensus

@@ -20,3 +20,5 @@ Initial setup complete.
 📌 Team update (2026-07-23T08:32:26+0000): Monitoring activated at bmoussaud's request. The initial GitHub scan found no open issues or pull requests; the overdue retrospective subsequently created retro-action issues #2, #3, and #4. — recorded by Scribe
 
 📌 Team update (2026-07-23T09:03:12+0000): Completed the scan-triage-review-merge-rescan loop for retro action #3. PR #6 merged as `abd5ceeccea651550080bae9dcb9446115152034`; #2 still awaits human approval, #4 remains blocked by #2, and #5 remains unauthorized backlog work despite duplicate member labels. No pull requests remain open. — recorded by Scribe
+
+📌 Team update (2026-07-28T12:01:41+02:00): PR-environment work in this repo requires `squad/{issue}-{slug}` branches; otherwise Azure preflight hard-blocks with `invalid_names`. GitHub's branch-rename API closed PR #44 instead of retargeting it, so renamed branches may require replacement PRs. Azure OIDC uses the immutable ID-qualified subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; Entra credentials must match exactly. — recorded by Scribe

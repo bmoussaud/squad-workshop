@@ -43,3 +43,5 @@
 - 2026-07-28T10:31:38+02:00: Updated `docs/design/azure-deployment.md` to mark the `gpt-image-2` `GlobalStandard` data-residency question as decided by Benoit in issue #2: inference processing may leave the EU, data at rest remains in the customer-designated geography, and only latency/network/egress/failure-coupling gates remain open.
 
 📌 Team update (2026-07-28T10:14:07+02:00): Foundry architecture/governance now accepts GlobalStandard non-EU inference for gpt-image-2 in dev and production; data at rest/artifacts remain in France Central/customer-designated storage. Earlier dev-only EU-premise approval is superseded. — decided by Benoit Moussaud
+
+📌 Team update (2026-07-28T12:01:41+02:00): PR-environment work in this repo requires `squad/{issue}-{slug}` branches; otherwise Azure preflight hard-blocks with `invalid_names`. GitHub's branch-rename API closed PR #44 instead of retargeting it, so renamed branches may require replacement PRs. Azure OIDC uses the immutable ID-qualified subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; Entra credentials must match exactly. — recorded by Scribe

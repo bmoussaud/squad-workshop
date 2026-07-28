@@ -38,3 +38,5 @@
 - Updated the static CSS contract to the new palette and validated with the full unittest suite.
 
 📌 Team update (2026-07-28T11:22:44+02:00): Issue #41 established that palette/background changes must be contrast-checked against every foreground token used on every affected surface before review. The original pre-green design already had coral/gold AA failures; Neo's accessible sage-green revision corrected those pre-existing failures while fixing Trinity's green regressions. — decided by Switch and Neo
+
+📌 Team update (2026-07-28T12:01:41+02:00): PR-environment work in this repo requires `squad/{issue}-{slug}` branches; otherwise Azure preflight hard-blocks with `invalid_names`. GitHub's branch-rename API closed PR #44 instead of retargeting it, so renamed branches may require replacement PRs. Azure OIDC uses the immutable ID-qualified subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; Entra credentials must match exactly. — recorded by Scribe
