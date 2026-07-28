@@ -383,3 +383,8 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **By:** Tank
 **What:** Added Entra federated credential `github-pr-app-environment-immutable` on `squad-workshop-pr-envs` for exact subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`.
 **Why:** The repo uses GitHub's immutable OIDC subject format; the only existing credential was legacy `repo:bmoussaud/squad-workshop:environment:azure-pr-app`, causing AADSTS700213 in deploy, teardown, and janitor jobs using `azure-pr-app`.
+
+### 2026-07-28T17:36:00+02:00: Markdown-aware PR ownership references
+**By:** Switch
+**What:** The CI ownership gate recognizes unique closing references only in genuine top-level Markdown prose. Code spans, fenced and indented code blocks, blockquotes, and Markdown tables are documentation or quotation and do not close issues. The gate remains fail-closed: exactly one unique issue is required. The PR body remains environment-backed and is never interpolated into the workflow run script.
+**Why:** Plain-text matching counted documented syntax as issue closures and rejected valid PRs.

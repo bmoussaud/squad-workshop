@@ -69,3 +69,4 @@ Updated the web stylesheet background palette only: --paper #dff3df, --surface #
 - Disclosed that unauthenticated artifact URLs are backed by a non-public Blob container and that lifecycle deletion begins no sooner than 30 days with up to seven days of soft-delete recovery.
 - Clarified that a bearer artifact URL can retrieve its image without per-user access control, and that Microsoft Foundry's abuse-monitoring-sample retention is provider-controlled and unknown to the service.
 - Preserved the deliberate GlobalStandard non-EU processing disclosure, the content-safety notice, and the notice-before-submit accessibility order.
+📌 Team update (2026-07-28T20:14:00+02:00): Trinity independently replaced Neo's locked-out #37 revision and shipped PR #64 (`a60b027`); follow-up #61 was filed. Verify relayed governance claims against primary Microsoft Learn sources rather than repeating them. — recorded by Scribe
