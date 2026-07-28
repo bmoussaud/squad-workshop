@@ -172,6 +172,26 @@ a:focus-visible {
   font-size: 0.8rem;
 }
 
+.ai-notice {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--forest);
+  padding: 16px 18px;
+  background: #edf7e9;
+}
+
+.ai-notice h2 {
+  max-width: none;
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+}
+
+.ai-notice p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
 .primary-action,
 .secondary-action {
   min-height: 3rem;
