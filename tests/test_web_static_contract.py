@@ -5,6 +5,25 @@ import unittest
 from unittest.mock import patch
 
 
+def _contrast_ratio(foreground: str, background: str) -> float:
+    def luminance(hex_color: str) -> float:
+        channels = (
+            int(hex_color[index : index + 2], 16) / 255 for index in (1, 3, 5)
+        )
+        linear = [
+            value / 12.92
+            if value <= 0.03928
+            else ((value + 0.055) / 1.055) ** 2.4
+            for value in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    lighter, darker = sorted(
+        (luminance(foreground), luminance(background)), reverse=True
+    )
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 class WebStaticContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
@@ -82,6 +101,10 @@ class WebStaticContractTests(unittest.TestCase):
 
         self.assertIn("--paper: #e4f1df;", css)
         self.assertIn("--surface: #f7fcf4;", css)
+        self.assertIn("--muted: #556052;", css)
+        self.assertIn("--coral: #9e3a31;", css)
+        self.assertIn("--gold: #7a5d16;", css)
+        self.assertIn("--line: #697564;", css)
         self.assertIn("background: var(--paper);", css)
         self.assertIn("background-color: var(--paper);", css)
         self.assertIn("background: rgba(228, 241, 223, 0.96);", css)
@@ -90,6 +113,41 @@ class WebStaticContractTests(unittest.TestCase):
         outdated_masthead = "rgba(" + ", ".join(("247", "243", "232"))
         self.assertNotIn(outdated_paper, css)
         self.assertNotIn(outdated_masthead, css)
+
+    def test_green_palette_preserves_text_and_ui_contrast(self) -> None:
+        backgrounds = {
+            "paper": "#e4f1df",
+            "surface": "#f7fcf4",
+            "result": "#d8ecd2",
+        }
+        normal_text = {
+            "ink": "#17251d",
+            "muted": "#556052",
+            "coral": "#9e3a31",
+            "gold": "#7a5d16",
+        }
+        ui_components = {
+            "line": "#697564",
+            "focus": "#0b6c88",
+            "forest": "#24513a",
+            "forest-deep": "#173a29",
+        }
+
+        for background_name, background in backgrounds.items():
+            for foreground_name, foreground in normal_text.items():
+                with self.subTest(
+                    background=background_name, foreground=foreground_name
+                ):
+                    self.assertGreaterEqual(
+                        _contrast_ratio(foreground, background), 4.5
+                    )
+            for foreground_name, foreground in ui_components.items():
+                with self.subTest(
+                    background=background_name, foreground=foreground_name
+                ):
+                    self.assertGreaterEqual(
+                        _contrast_ratio(foreground, background), 3.0
+                    )
 
     def test_javascript_is_progressive_enhancement_not_required_navigation(self) -> None:
         from fastapi.testclient import TestClient
