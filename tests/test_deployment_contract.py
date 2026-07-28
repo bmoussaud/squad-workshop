@@ -241,21 +241,6 @@ class DeploymentContractTests(unittest.TestCase):
             ],
         )
 
-    def test_foundry_nested_deployment_names_are_compact_for_long_pr_slugs(self) -> None:
-        self.assertIn(
-            "var moduleDeploymentNameToken = toLower(uniqueString(resourceGroup().id, applicationIdentityName, logAnalyticsWorkspaceName))",
-            self.foundry_bicep,
-        )
-        for prefix in (
-            "platform-identity",
-            "application-identity",
-            "log-analytics",
-            "application-insights",
-            "foundry-account",
-            "shared-foundry-rbac",
-        ):
-            self.assertIn(f"name: '{prefix}-${{moduleDeploymentNameToken}}'", self.foundry_bicep)
-
     def test_main_bicep_preserves_module_boundary_and_required_outputs(self) -> None:
         self.assertIn(
             "var moduleDeploymentNameToken = empty(containerAppsEnvironmentName) ? environmentName : containerAppsEnvironmentName",

@@ -25,10 +25,9 @@ param modelCapacity int
 var resolvedSharedFoundryResourceGroupName = empty(sharedFoundryResourceGroupName) ? resourceGroup().name : sharedFoundryResourceGroupName
 // Built-in role definition ID for "Cognitive Services OpenAI User" (subscriptionResourceId is stable across regions/tenants).
 var openAiUserRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
-var moduleDeploymentNameToken = toLower(uniqueString(resourceGroup().id, applicationIdentityName, logAnalyticsWorkspaceName))
 
 module platformIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.6.0' = {
-  name: 'platform-identity-${moduleDeploymentNameToken}'
+  name: 'platform-identity-${platformIdentityName}'
   params: {
     name: platformIdentityName
     location: location
@@ -37,7 +36,7 @@ module platformIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
 }
 
 module applicationIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.6.0' = {
-  name: 'application-identity-${moduleDeploymentNameToken}'
+  name: 'application-identity-${applicationIdentityName}'
   params: {
     name: applicationIdentityName
     location: location
@@ -46,7 +45,7 @@ module applicationIdentity 'br/public:avm/res/managed-identity/user-assigned-ide
 }
 
 module logAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspace:0.16.0' = {
-  name: 'log-analytics-${moduleDeploymentNameToken}'
+  name: 'log-analytics-${logAnalyticsWorkspaceName}'
   params: {
     name: logAnalyticsWorkspaceName
     location: location
@@ -61,7 +60,7 @@ module logAnalyticsWorkspace 'br/public:avm/res/operational-insights/workspace:0
 }
 
 module applicationInsights 'br/public:avm/res/insights/component:0.8.0' = {
-  name: 'application-insights-${moduleDeploymentNameToken}'
+  name: 'application-insights-${applicationInsightsName}'
   params: {
     name: applicationInsightsName
     workspaceResourceId: logAnalyticsWorkspace.outputs.resourceId
@@ -77,7 +76,7 @@ module applicationInsights 'br/public:avm/res/insights/component:0.8.0' = {
 }
 
 module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = if (deployFoundry) {
-  name: 'foundry-account-${moduleDeploymentNameToken}'
+  name: 'foundry-account-${foundryAccountName}'
   params: {
     name: foundryAccountName
     kind: 'AIServices'
@@ -166,7 +165,7 @@ resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-0
 // A nested module is required because the shared account may live in a different resource group than this
 // deployment's target scope, and a resource's `scope` must match its own file's target scope.
 module sharedFoundryRbac 'modules/shared-foundry-rbac.bicep' = if (!deployFoundry) {
-  name: 'shared-foundry-rbac-${moduleDeploymentNameToken}'
+  name: 'shared-foundry-rbac-${applicationIdentityName}'
   scope: resourceGroup(resolvedSharedFoundryResourceGroupName)
   params: {
     foundryAccountName: sharedFoundryAccountName
