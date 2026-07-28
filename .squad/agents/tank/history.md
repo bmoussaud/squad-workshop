@@ -60,3 +60,14 @@ Added `.github/workflows/pr-environment-teardown.yml` (`pull_request: closed`, b
 
 ### 2026-07-27T21:27:16+02:00 — Issue #20 (Phase 4 advisories): teardown failure-honesty
 Fixed two non-blocking advisories in .github/workflows/pr-environment-teardown.yml from Rai's GREEN review; surgical, workflow file only. ADVISORY 1: z group list ran under set -uo pipefail (no `-e`), so a failed query left `matches` empty and the idempotency branch reported a FALSE `status=noop` exit 0 — leaking the RG until the janitor reaped it (up to 7 days). Fix: capture the query exit status explicitly (`matches=$(az group list ...)` || query_rc=$?`) and `exit 1` on `query_rc != 0`; empty-but-successful still no-ops exit 0 (idempotency preserved for never-deployed/draft/fork/already-gone). Did NOT add `set -e` — delete loop's "already gone vs failed" distinction untouched. ADVISORY 2: chose the real guard over softening the comment — reject `PR_NUMBER` not matching `^[0-9]+$` before `--query`; makes the "validated integer" claim true and removes reliance on the reader knowing GitHub's payload schema. Proved via Git bash: failing query -> exit 1 loud; empty success -> noop exit 0; guard accepts 42, rejects "42; rm -rf" and "". YAML parses; full suite 246 OK. Decision in inbox (tank-teardown-failure-honesty.md).
+
+## 2026-07-27 - Issue #29: Azure OIDC + repo config for per-PR ephemeral envs
+
+- Created Entra app registration `squad-workshop-pr-envs` (appId 3fdc9811-6ee9-4b95-89ae-ed79bba74235, SP f7cead19-c757-47ba-9993-f6c44a9d9c21), no secret.
+- Added federated credential `github-pr-app-environment` subject `repo:bmoussaud/squad-workshop:environment:azure-pr-app` - one credential covers deploy/teardown/janitor.
+- Granted Contributor + Role Based Access Control Administrator at subscription scope (no Owner).
+- Created GitHub Environment `azure-pr-app` (no reviewers/branch policy).
+- Set 11 repo Actions variables (SHARED_* + AZURE_*).
+- Verified: compliant branch + real ACR => decision=proceed; empty ACR => invalid_service_name.
+- Finding: PR #30 branch `bmoussaud-musical-spork` fails the name gate (invalid_names) before the ACR check, so its preflight stays red by design. Rerun confirmed SHARED_ACR_NAME now populated.
+- Added runbook docs/runbooks/pr-environment-azure-setup.md.
