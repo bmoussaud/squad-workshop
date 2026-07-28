@@ -15,9 +15,11 @@ Key retained history:
 - 2026-07-27 #16/#25: Delivered deterministic PR-environment naming/preflight and relaxed the CI branch-name gate to advisory while keeping exact issue closure hard-fail.
 - 2026-07-27 #15/#20/#29: Parameterized PR Bicep names/env-var emission, added close-time teardown and daily janitor workflows, and configured secretless Azure OIDC for PR environments. Teardown/janitor deletion is tag-scoped and must fail loudly on Azure query errors.
 - 2026-07-28 #18/#17/#39/#41: Verified budget alerts and child tags, participated in Foundry exception gating/live validation, confirmed `GlobalStandard` is not EU-bound for inference, and supported the accessible green-background PR.
+- 2026-07-28 #23: Corrected the PR #14 per-PR environment worked example to the implementation-derived `hash8` value `4c32c628`. The canonical SHA-256 input is `bmoussaud/squad-workshop|14|render-card-layout`; keep `repo` explicitly documented as GitHub `owner/repo` and label `azd` and managed-environment length caps as conservative project constraints where their platforms publish no maximum.
 
 ## Recent Updates
 
+- 2026-07-28T17:40:33.461+02:00 #34: `@secure()` must decorate the Application Insights connection-string outputs at both the Foundry module and root deployment boundaries. Bicep secure outputs require Bicep 0.35.1 or later; verify that the compiled ARM output type is `securestring`. The connection string remains available only through the existing secure Container App app-setting wiring, not `azd` or deployment outputs.
 - 2026-07-28 #45 preflight: Diagnosed `pr_preflight.py` exit 3 as an intentional `invalid_names` hard block for branches outside `squad/{issue}-{slug}`; workflow diagnostics now print helper output before enforcement.
 - 2026-07-28 #45 OIDC: Added Entra federated credential `github-pr-app-environment-immutable` on app `squad-workshop-pr-envs` for exact subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; deploy/teardown/janitor OIDC now authenticate.
 - 2026-07-28 #45 workload profile: PR environments use Container Apps `Consumption` workload profile semantics and omit dedicated min/max counts so scale-to-zero remains valid.
