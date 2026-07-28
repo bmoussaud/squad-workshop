@@ -107,11 +107,44 @@ param storageAccountName string = ''
 @description('Precomputed private app-tier VNet name (Phase 1 naming module, VIRTUAL_NETWORK_NAME). Empty keeps the dev-derived name.')
 param virtualNetworkName string = ''
 
-var tags = {
+@description('Ephemeral marker for per-PR child resources. Empty for normal dev/main deploys (no ephemeral tag is applied); PR environments pass "true". Applied to child resources only; the resource group ephemeral/TTL tags are stamped by the workflow.')
+param ephemeralTag string = ''
+
+@description('PR number stamped on per-PR child resources for ownership. Empty for non-PR deploys.')
+param prNumberTag string = ''
+
+@description('PR author login stamped on per-PR child resources for ownership. Empty for non-PR deploys.')
+param authorTag string = ''
+
+@description('Creation timestamp (ISO 8601 UTC) stamped on per-PR child resources. Empty for non-PR deploys.')
+param createdAtTag string = ''
+
+var baseTags = {
   environment: environmentName
   workload: 'fantasy-cards'
   managedBy: 'azd-bicep'
 }
+
+// Stable per-PR identity tags are propagated onto CHILD resources so ownership
+// is visible on each resource, not only on the resource group. Only the
+// drift-free identity subset is carried:
+//   * `expires-at` is deliberately EXCLUDED. The workflow resets it on the
+//     resource group on every deploy, and the TTL janitor (pr_env_reaper.py)
+//     reads it ONLY from the resource group. Copying it onto children would
+//     drift out of sync on redeploy and create a misleading second source of
+//     truth for a value the reaper never reads here.
+//   * `environment-type`/`repo`/`branch` are omitted as non-identity RG-scoped
+//     metadata; the reaper and the concurrency cap query resource GROUPS only.
+// Each tag is applied only when its parameter is non-empty, so normal dev/main
+// deploys (which pass nothing) keep exactly the three base tags, and no
+// shared/production resource can acquire ephemeral=true through this path.
+var tags = union(
+  baseTags,
+  empty(ephemeralTag) ? {} : { ephemeral: ephemeralTag },
+  empty(prNumberTag) ? {} : { 'pr-number': prNumberTag },
+  empty(authorTag) ? {} : { author: authorTag },
+  empty(createdAtTag) ? {} : { 'created-at': createdAtTag }
+)
 
 module foundry 'foundry.bicep' = {
   name: 'foundry-${environmentName}'
