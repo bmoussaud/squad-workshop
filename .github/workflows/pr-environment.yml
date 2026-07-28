@@ -202,6 +202,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: read # enumerate open PRs for cap accounting
     outputs:
       environment_name: ${{ steps.names.outputs.environment_name }}
       app_url: ${{ steps.endpoint.outputs.app_url }}
@@ -338,17 +339,51 @@ jobs:
           SHARED_ACR_NAME: ${{ vars.SHARED_CONTAINER_REGISTRY_NAME }}
           REQUIRES_FOUNDRY: ${{ needs.preflight.outputs.requires_foundry }}
           FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -uo pipefail
-          # Count active app-tier PR environments by tag, excluding this PR's own
-          # group so a redeploy never counts against itself. PR_NUMBER is a
-          # validated integer read from env, not interpolated from github.event.
-          active="$(az group list --query "length([?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app' && tags.\"pr-number\"!='${PR_NUMBER}'])" -o tsv)"
-          echo "Active app-tier PR environments (excluding this PR): ${active}"
+          set -euo pipefail
+          # Count active app-tier PR environments by tag AND by open-PR membership,
+          # excluding this PR's own group so a redeploy never counts against itself.
+          # Closed/merged PR leaks are surfaced as warnings and left for teardown /
+          # janitor cleanup, but they do not consume the live concurrency budget.
+          open_prs="$(gh pr list --state open --limit 200 --json number \
+            --jq 'map(.number | tostring) | join(",")')"
+          echo "Open pull requests considered for app-tier cap: ${open_prs}"
+
+          app_groups="$(az group list \
+            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app']" \
+            -o json)"
+          app_count_out="$(printf '%s' "${app_groups}" | python3 infra/scripts/pr_env_active_count.py \
+            --groups-json - \
+            --open-pr-numbers "${open_prs}" \
+            --current-pr-number "${PR_NUMBER}" \
+            --format env)"
+          printf '%s\n' "${app_count_out}"
+          active="$(printf '%s\n' "${app_count_out}" | awk -F= '$1 == "active_count" { print $2 }')"
+          orphan_count="$(printf '%s\n' "${app_count_out}" | awk -F= '$1 == "orphan_count" { print $2 }')"
+          orphan_names="$(printf '%s\n' "${app_count_out}" | awk -F= '$1 == "orphan_names" { print $2 }')"
+          if [ "${orphan_count}" != "0" ]; then
+            echo "::warning::Ignoring ${orphan_count} orphaned pr-app resource group(s) whose PR is no longer open: ${orphan_names}. Run the PR Azure Environment Janitor or inspect close-time teardown."
+          fi
+          echo "Active app-tier PR environments for open PRs (excluding this PR): ${active}"
           active_foundry=0
           if [ "$REQUIRES_FOUNDRY" = "true" ]; then
-            active_foundry="$(az group list --query "length([?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-foundry' && tags.\"pr-number\"!='${PR_NUMBER}'])" -o tsv)"
-            echo "Active Foundry exception PR environments (excluding this PR): ${active_foundry}"
+            foundry_groups="$(az group list \
+              --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-foundry']" \
+              -o json)"
+            foundry_count_out="$(printf '%s' "${foundry_groups}" | python3 infra/scripts/pr_env_active_count.py \
+              --groups-json - \
+              --open-pr-numbers "${open_prs}" \
+              --current-pr-number "${PR_NUMBER}" \
+              --format env)"
+            printf '%s\n' "${foundry_count_out}"
+            active_foundry="$(printf '%s\n' "${foundry_count_out}" | awk -F= '$1 == "active_count" { print $2 }')"
+            foundry_orphan_count="$(printf '%s\n' "${foundry_count_out}" | awk -F= '$1 == "orphan_count" { print $2 }')"
+            foundry_orphan_names="$(printf '%s\n' "${foundry_count_out}" | awk -F= '$1 == "orphan_names" { print $2 }')"
+            if [ "${foundry_orphan_count}" != "0" ]; then
+              echo "::warning::Ignoring ${foundry_orphan_count} orphaned pr-foundry resource group(s) whose PR is no longer open for cap accounting: ${foundry_orphan_names}. Foundry exceptions require operator cleanup if close-time teardown missed them."
+            fi
+            echo "Active Foundry exception PR environments for open PRs (excluding this PR): ${active_foundry}"
           fi
           # Authoritative cap check via pr_preflight (fails closed at 3). BLOCKED
           # -> non-zero exit -> the run fails before we provision anything.

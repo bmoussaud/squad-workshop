@@ -89,7 +89,7 @@ Deployment path:
 1. Reject fork PRs from Azure steps. They run build/test only and receive no OIDC token capable of Azure access.
 2. Skip draft PRs until they become ready for review.
 3. Compute `azd` environment name and compact resource names deterministically from repo, PR number, and slug.
-4. Check app-tier concurrency: fail closed if three app-tier PR environments are already active.
+4. Check app-tier concurrency: fail closed if three app-tier PR environments belonging to currently open PRs are already active; closed/merged PR leaks are reported as orphans for teardown/janitor cleanup instead of consuming the live cap.
 5. Authenticate to Azure through GitHub OIDC and the `azure-pr-app` GitHub Environment.
 6. Configure `azd` environment variables, including shared ACR and shared Foundry references.
 7. Run `azd provision`, then `azd deploy`. Do not use `azd up` in CI because provision and deploy need separate logs, gates, and failure handling.
@@ -103,8 +103,8 @@ Teardown path:
 
 Janitor path:
 
-- Daily, enumerate app-tier resource groups tagged `ephemeral=true`, `environment-type=pr-app`, and `expires-at < now`.
-- Tear down expired app-tier PR environments with `azd down --purge` or delete the tagged resource group if `azd` state is unavailable.
+- Daily and after close-time teardown completes, enumerate app-tier resource groups tagged `ephemeral=true`, `environment-type=pr-app`, and either `expires-at < now` or `pr-number` belonging to a closed PR.
+- Tear down expired or closed-PR app-tier PR environments with `azd down --purge` or delete the tagged resource group if `azd` state is unavailable.
 - Do not infer TTL deletion for `environment-type=pr-foundry`: close-time teardown is the deterministic cap-release path for Foundry exceptions, while the janitor surfaces expired or closed-PR `pr-foundry` groups as operator cleanup warnings.
 - Report orphaned or failed deletes as workflow annotations and leave enough non-secret identifiers for Tank to investigate.
 
@@ -174,7 +174,7 @@ Cost controls:
 
 - Each PR environment gets a resource-group monthly budget of `$50`.
 - Budget alerts fire at 50%, 80%, and 100% to the approved action group.
-- App-tier ephemeral concurrency is capped at three active environments.
+- App-tier ephemeral concurrency is capped at three active environments for currently open PRs.
 - Cost-bearing Foundry ephemeral concurrency is capped at one active environment and requires the Foundry approval gate.
 - Shared Foundry usage must be monitored separately because model invocation charges can dominate app-tier compute and storage.
 

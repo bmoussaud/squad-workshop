@@ -1,4 +1,4 @@
-# Per-PR ephemeral Azure environment: DAILY TTL JANITOR.
+# Per-PR ephemeral Azure environment: TTL / ORPHAN JANITOR.
 #
 # Design: docs/design/pr-ephemeral-environments.md ("Janitor path" ~L104-108,
 # "Cost & lifecycle" ~L165-170). Mandatory backstop cleanup for environments the
@@ -32,6 +32,11 @@ on:
   # run it via the workflow_dispatch below) to resume automatic reaping.
   schedule:
     - cron: '17 3 * * *'
+  # Also run after close-time teardown finishes (success or failure) so closed-PR
+  # app-tier leaks are reclaimed promptly by trusted default-branch janitor code.
+  workflow_run:
+    workflows: ['PR Azure Environment Teardown']
+    types: [completed]
   # Manual run, with an optional dry-run that reports what WOULD be reaped
   # without deleting anything.
   workflow_dispatch:
