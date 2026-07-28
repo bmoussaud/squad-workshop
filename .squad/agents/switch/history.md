@@ -43,5 +43,3 @@
 
 📌 Team update (2026-07-28T17:36:00+02:00): PR ownership validation must parse only genuine top-level Markdown closing references. Mask code spans (including balanced nested delimiters), fenced/indented blocks, blockquotes, and tables; preserve offsets/newlines; retain one-unique-issue fail-closed enforcement and environment-backed PR-body access. — decided by Switch
 📌 Team update (2026-07-28T20:14:00+02:00): Switch shipped #27 as PR #58 and correctly invalidated the coordinator's phantom red-build claim: invoke tests as `PYTHONPATH=src python -m pytest`, since a bare invocation can import a sibling worktree. Clean-worktree rapid idles are suspicious no-ops, not successful delegated work. Switch is now on #42. — recorded by Scribe
-
-📌 Team update (2026-07-28T20:03:24+02:00): New regression tests cover PR-environment cap counting: only app-tier resource groups mapped to open PRs count against concurrency; orphaned closed-PR groups warn and janitor cleanup runs after teardown — decided by Tank
