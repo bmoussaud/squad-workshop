@@ -45,9 +45,9 @@ No tenant, subscription, profile capacity, budget, alert support, model capacity
 
 ## Decision Summary
 
-Use a single **Azure Container Apps** HTTP application as the initial production host in a Container Apps environment with a **dedicated workload profile**, backed by **Azure Blob Storage** for generated images and artifact metadata. Prefer **France Central** for application and platform resources, subject to service and SKU availability, quota, data-residency, latency, and recovery validation. Assign a **user-assigned managed identity** for Azure access, keep any model-provider credential that cannot use Microsoft Entra authentication in **Azure Key Vault**, and send platform logs to an **Azure Monitor Log Analytics workspace**. Instrument application and agent traces and metrics with OpenTelemetry and export them to **Azure Monitor Application Insights**.
+Use a single **Azure Container Apps** HTTP application as the initial production host in a Container Apps environment with a **dedicated workload profile**, backed by **Azure Blob Storage** for generated images and artifact metadata. Prefer **France Central** for application and platform resources, subject to service and SKU availability, quota, latency, and recovery validation. The Foundry inference data-residency decision is recorded below and is no longer an open validation gate for the current `gpt-image-2` `GlobalStandard` path. Assign a **user-assigned managed identity** for Azure access, keep any model-provider credential that cannot use Microsoft Entra authentication in **Azure Key Vault**, and send platform logs to an **Azure Monitor Log Analytics workspace**. Instrument application and agent traces and metrics with OpenTelemetry and export them to **Azure Monitor Application Insights**.
 
-Use **Microsoft Foundry** as the approved platform for agent capabilities and model access without selecting a final model in this design. Prefer **Sweden Central** for the Foundry project and deployments, but revalidate the required Foundry features, model and version, deployment SKU, quota, and available capacity immediately before provisioning. The application-to-Foundry path is therefore cross-region by default; production approval requires measured and accepted latency, data-residency behavior, network path, egress cost, and failure coupling between France Central and Sweden Central.
+Use **Microsoft Foundry** as the approved platform for agent capabilities and model access without selecting a final model in this design. Prefer **Sweden Central** for the Foundry project and deployments, but revalidate the required Foundry features, model and version, deployment SKU, quota, and available capacity immediately before provisioning. The application-to-Foundry path is therefore cross-region by default; production approval still requires measured and accepted latency, network path, egress cost, and failure coupling between France Central and Sweden Central.
 
 Start with synchronous orchestration only while measurements support it. Keep the existing job-shaped application contract and cloud-neutral ports for model invocation, artifact storage, and job state. If the queue trigger below is reached, split request intake from generation by adding a queue and a separately scaled worker; do not move orchestration logic into Azure SDK bindings or hosting-framework callbacks.
 
@@ -98,7 +98,7 @@ The initial topology assumes all of the following:
 - Typical end-to-end generation finishes within 60 seconds and the provisional application deadline is 120 seconds. Clients and every proxy in front of the service can tolerate that synchronous wait.
 - The selected model endpoint supports bounded request timeouts and either idempotency keys or safe application-level deduplication. Its rate, quota, capacity, and spend limits are known before production.
 - A cold start is acceptable for a development app on the Consumption workload profile. Production uses a dedicated workload profile and must fund and validate the selected profile capacity; keep at least one application replica when the latency objective requires it.
-- France Central is acceptable for application and platform resources, and Sweden Central is acceptable for Microsoft Foundry, only after service/SKU availability, quota, recovery, data-residency, latency, cross-region network path, egress cost, and failure-coupling requirements are validated.
+- France Central is acceptable for application and platform resources, and Sweden Central is acceptable for Microsoft Foundry, only after service/SKU availability, quota, recovery, latency, cross-region network path, egress cost, and failure-coupling requirements are validated. Data residency for the current `gpt-image-2` `GlobalStandard` path is decided below: inference can leave the EU, while data at rest remains in the customer-designated geography.
 - Images are private by default. The application returns short-lived, narrowly scoped access URLs only if direct client download is required.
 - The team accepts containers and a registry as deployment artifacts. If it does not, Functions Flex Consumption or App Service becomes more attractive.
 
@@ -162,12 +162,29 @@ If an approved non-Foundry model provider supports Microsoft Entra workload iden
 
 Microsoft Foundry is validated and approved as the agent/model platform. Keep the application model and agent ports provider-neutral so model choice, deployment type, or a future provider change does not leak into domain orchestration. Evaluate Microsoft Agent Framework for the agent implementation, and require quality evaluation, tracing, safety testing, and versioned rollout before production; this design does not select a model or authorize a Foundry deployment.
 
-Prefer Sweden Central for the Foundry project, Agent Service capabilities, and model deployments. That preference is not evidence that every required model, tool, agent feature, deployment SKU, or capacity allocation is available there. Before provisioning, verify the exact model/version and deployment type, required Agent Service tools and features, subscription quota, live capacity, networking support, and data-processing geography in current Microsoft documentation and the target subscription.
+Prefer Sweden Central for the Foundry project, Agent Service capabilities, and model deployments. That preference is not evidence that every required model, tool, agent feature, deployment SKU, or capacity allocation is available there. Before provisioning, verify the exact model/version and deployment type, required Agent Service tools and features, subscription quota, live capacity, and networking support in current Microsoft documentation and the target subscription. Re-check processing geography only when a revisit trigger below applies.
 
-With the application in France Central and Foundry in Sweden Central, validate and explicitly accept:
+### Foundry GlobalStandard Data Residency Decision
+
+**Decision date:** 2026-07-28, through GitHub issue #2, closed after Product Owner re-decision.
+
+**Decision owner:** Benoit Moussaud (Product Owner).
+
+For the current Microsoft Foundry `gpt-image-2` deployment, `GlobalStandard` inference processing is accepted for both development and production even though it is not EU-bound. Microsoft documents Global deployment types as eligible for processing in any Azure region; prompts and responses may be processed in any geography where the relevant Azure-sold model is deployed. `gpt-image-2` is available under Global Standard in US regions such as `eastus2` and `westus3` as well as EU regions such as `swedencentral` and `polandcentral`, so a Sweden Central resource does not make inference EU-only.
+
+This does **not** change data-at-rest placement. Stored data, including the abuse-monitoring data store, remains in the customer-designated geography. The accepted risk is specifically processing location for inference prompts and responses under `GlobalStandard`; conflating processing location with storage location was the stale assumption corrected by issue #2.
+
+Rationale: EU-bound inference is not currently purchasable for this model in the target context. `gpt-image-2` is not listed under `DataZoneStandard` or regional `Standard`; the live subscription exposes `GlobalStandard` only, with no DataZone quota. Constraining inference to the EU would require abandoning the model. Where Data Zone pricing exists, it carries roughly a 10% premium.
+
+Current deployed development state: account `fnd-fantasy-cards-dev-8f327f8c` (`AIServices/S0`, `swedencentral`), deployment `gpt-image-2-dev`, model `gpt-image-2` version `2026-04-21`, `GlobalStandard`, capacity 1, RAI policy `Microsoft.DefaultV2`.
+
+Revisit this decision if EU residency becomes a contractual or regulatory requirement, or if Microsoft makes `gpt-image-2` available under an EU-bound deployment type.
+
+References: GitHub issue #2; [Azure Foundry deployment types](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types); [Azure OpenAI data, privacy, and security](https://learn.microsoft.com/en-us/azure/foundry/responsible-ai/openai/data-privacy).
+
+With the application in France Central and Foundry in Sweden Central, the data-residency decision above is already accepted for the current `gpt-image-2` `GlobalStandard` path. Continue to validate and explicitly accept:
 
 - End-to-end p50/p95/p99 latency and timeout budgets across the inter-region path.
-- Data residency and processing locations for prompts, outputs, agent state, traces, evaluation data, and the selected model deployment type.
 - Network routing, DNS, private connectivity or public egress controls, and failure behavior when either region or the path between them is impaired.
 - Inter-region data-transfer and egress charges under representative request and response sizes.
 - Failure coupling, retry amplification, and whether recovery requires a second Foundry deployment, a different supported region, queue buffering, or a degraded application mode.
@@ -243,12 +260,12 @@ Choose an **Azure Service Bus queue** instead when built-in dead-lettering, dupl
 
 ### Initial Production
 
-- France Central as the preferred region for application/platform resources, after service/SKU availability, quota, data-residency, latency, and recovery validation.
+- France Central as the preferred region for application/platform resources, after service/SKU availability, quota, latency, and recovery validation.
 - One Azure Container Apps environment with a validated dedicated workload profile and one externally accessible HTTP Container App assigned to that profile.
 - One general-purpose v2 Storage account with a private artifact container; use block blobs and an explicit lifecycle policy.
 - One user-assigned managed identity with container-scoped Blob data access, Foundry invocation access, and Key Vault secret-read access where required. Add separate user-assigned identities for components whose permissions must be isolated.
 - One Key Vault Standard vault for credentials that cannot use Microsoft Entra authentication.
-- Sweden Central as the preferred region for a Microsoft Foundry project and the selected agent/model deployments, only after exact feature, model, deployment SKU, quota, capacity, networking, and data-residency validation.
+- Sweden Central as the preferred region for a Microsoft Foundry project and the selected agent/model deployments, only after exact feature, model, deployment SKU, quota, capacity, and networking validation. The current `gpt-image-2` `GlobalStandard` data-residency decision is accepted above and must be revisited only on the stated triggers.
 - One Log Analytics workspace and workspace-based Application Insights resource, with structured logs, OpenTelemetry, actionable alerts, sampling, and retention limits.
 - No queue initially, provided every assumption and synchronous acceptance test passes. Keep `maxReplicas` and provider concurrency low and explicit.
 
@@ -261,19 +278,19 @@ Set at least one application replica when the latency objective requires it, and
 - Choose App Service if suitable paid capacity already exists, deployment slots and mature web-app operations are decisive, or predictable always-on workers are required.
 - Add Front Door or API Management only for demonstrated edge routing, WAF, global distribution, client policy, or API governance needs; each introduces another timeout, cost, and operational boundary.
 - Add private endpoints, VNet integration, NAT, or firewall egress controls when threat modeling, compliance, provider IP allowlisting, or data-exfiltration controls require them. Validate Container Apps environment/networking constraints before selecting a network topology.
-- Revisit storage redundancy, regional failover, multi-region compute, and Foundry recovery placement after recovery objectives, cross-region failure behavior, and data residency are approved.
+- Revisit storage redundancy, regional failover, multi-region compute, and Foundry recovery placement after recovery objectives and cross-region failure behavior are approved. Revisit Foundry data residency only if the accepted `GlobalStandard` decision's triggers occur.
 - Revisit a dedicated job-state database when query and consistency requirements exceed guarded JSON blobs.
 
 ## Validation Gates Before Infrastructure Code
 
 1. Select candidate agent/model capabilities before implementation, then measure model and tool latency, output size, failure modes, throttling, idempotency support, quality, safety, and price with representative requests. Do not finalize a model from this document alone.
-2. Define synchronous client deadline, availability target, retention/deletion requirements, recovery objectives, data classification, and approved monthly budgets. Validate France Central for application/platform resources and Sweden Central for Foundry against service/SKU availability, quota, capacity, data residency, latency, network path, egress cost, and recovery requirements.
+2. Define synchronous client deadline, availability target, retention/deletion requirements, recovery objectives, data classification, and approved monthly budgets. Validate France Central for application/platform resources and Sweden Central for Foundry against service/SKU availability, quota, capacity, latency, network path, egress cost, and recovery requirements. Treat the current `gpt-image-2` `GlobalStandard` data-residency decision as accepted unless a revisit trigger applies.
 3. Load-test the selected container in a temporary Azure deployment with the intended dedicated workload profile SKU and instance bounds, CPU/memory, concurrency, min/max app replicas, full ingress path, and cross-region Foundry path.
 4. Prove user-assigned managed-identity Blob and Foundry access plus Key Vault-backed secret retrieval without Azure connection strings. Verify least-privilege RBAC survives app revisions/replacement and that components with different trust boundaries use separate identities.
 5. Prove correlation from request through agent/tool/model dependencies and Blob write, and test evaluations and alerts for failure, latency, throttling, quality regression, safety, and budget thresholds.
 6. Exercise shutdown during a generation. Confirm terminal state is recoverable and duplicate execution does not cause an uncontrolled second charge.
 7. Re-evaluate the queue trigger from measured p95/p99 and burst behavior. Record the final compute, redundancy, retention, and queue decisions before writing infrastructure as code.
-8. Revalidate the exact Foundry model/version, deployment SKU/type, Agent Service features and tools, Sweden Central support, subscription quota, and live capacity immediately before provisioning; document any fallback region and its data-residency implications.
+8. Revalidate the exact Foundry model/version, deployment SKU/type, Agent Service features and tools, Sweden Central support, subscription quota, and live capacity immediately before provisioning; document any fallback region and whether it changes the accepted data-residency decision.
 
 ## Verified Service References
 
