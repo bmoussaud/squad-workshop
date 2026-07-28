@@ -37,7 +37,7 @@ Federated credential:
 | subject   | `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`       |
 | audiences | `api://AzureADTokenExchange`                                                     |
 
-The subject must match GitHub's OIDC claim exactly. In this account GitHub emits the owner/repository-id form shown above (`repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`), not the shorter `repo:{owner}/{repo}:environment:{env}` form. Verify against the `subject claim` line printed by `Azure/login` if the account OIDC template changes.
+The subject must match GitHub's OIDC claim exactly. This repository was created after GitHub's immutable OIDC subject rollout, so GitHub emits the owner/repository-id form shown above (`repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`), not the shorter legacy `repo:{owner}/{repo}:environment:{env}` form. Verify against the `subject claim` line printed by `Azure/login` if GitHub changes its default subject behavior.
 
 ```bash
 az ad app create --display-name squad-workshop-pr-envs
