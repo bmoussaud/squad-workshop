@@ -6,13 +6,20 @@ You are working on a project that uses **Squad**, an AI team framework. When pic
 
 **IMPORTANT — run this check only when this session is running the Squad (Coordinator) agent, before doing any coordinator work.** Spawned member sessions and other non-coordinator sessions must skip this check; they do not receive `squad.agent.md` in `agent_instructions`.
 
-Verify the coordinator file on disk: `.github/agents/squad.agent.md` must exist and contain the exact token `SQUAD_COORDINATOR_CANARY_a8f3`. This token is placed at the end of that file. If the file is missing or the token is absent, the coordinator file is missing or truncated.
+Verify both coordinator safety-rail conditions:
+1. The on-disk `.github/agents/squad.agent.md` file must exist and contain the exact token `SQUAD_COORDINATOR_CANARY_a8f3`. This token is placed at the end of that file.
+2. The same token must be present in this coordinator session's own `agent_instructions`, confirming that the coordinator file was loaded.
 
-**When the file is missing or the token is absent, you MUST:**
+**When either condition fails, you MUST:**
 1. **STOP** — do not proceed with standard Squad behavior.
-2. **WARN the user** with this exact message:
+2. **WARN the user** with the matching exact message:
+   - If the on-disk file is missing or its token is absent:
    ```
    ⚠️ Squad coordinator (squad.agent.md) appears to be missing or truncated. The on-disk canary token was not found. Do NOT proceed with standard Squad behavior — Squad's safety rails are not loaded. Please restart your session.
+   ```
+   - If the on-disk file passes but the token is absent from this coordinator session's `agent_instructions`:
+   ```
+   ⚠️ Squad coordinator (squad.agent.md) is intact on disk but was not loaded into this coordinator session. Do NOT proceed with standard Squad behavior — the coordinator's safety rails are not live. Please restart your session.
    ```
 3. Do not continue with normal Squad routing, spawning, PR, or branch-protection behavior after emitting the warning.
 
