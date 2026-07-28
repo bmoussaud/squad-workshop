@@ -160,26 +160,6 @@ jobs:
           echo "PLATFORM_IDENTITY_NAME=id-${CONTAINER_APPS_ENVIRONMENT_NAME}-plat" >> "$GITHUB_ENV"
           echo "APPLICATION_IDENTITY_NAME=id-${CONTAINER_APPS_ENVIRONMENT_NAME}-app" >> "$GITHUB_ENV"
 
-      - name: Export per-PR observability names
-        env:
-          # Log-safe projection from the naming step (id: names). application_insights
-          # already reaches Bicep via the BICEPPARAM envvars contract above; the Log
-          # Analytics workspace name is Trinity's `log_analytics` field (Phase 1
-          # naming module) and is exported here so PR environments stop falling back
-          # to main.bicepparam's hardcoded dev workspace name inside the PR RG.
-          LOG_ANALYTICS_WORKSPACE_NAME_COMPUTED: ${{ steps.names.outputs.log_analytics }}
-        run: |
-          set -euo pipefail
-          if [ -n "${LOG_ANALYTICS_WORKSPACE_NAME_COMPUTED}" ]; then
-            echo "LOG_ANALYTICS_WORKSPACE_NAME=${LOG_ANALYTICS_WORKSPACE_NAME_COMPUTED}" >> "$GITHUB_ENV"
-          else
-            # Guard: never export an EMPTY name (readEnvironmentVariable would take
-            # the empty string over its default and fail the deploy). If the naming
-            # module has not emitted log_analytics yet, leave the bicepparam default
-            # in place and make the fallback visible instead of silently breaking.
-            echo "::warning::naming module emitted no log_analytics name; main.bicepparam dev default will be used for the Log Analytics workspace"
-          fi
-
       - name: Export per-PR child-resource identity tags
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
