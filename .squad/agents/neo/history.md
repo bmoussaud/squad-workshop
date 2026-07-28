@@ -30,3 +30,9 @@
 📌 Team update (2026-07-28T10:05:06+02:00): Benoit Moussaud (Product Owner) approved the Foundry stack for development only. Neo must carry forward #37: production requires a user-facing notice before release. Production also remains gated on #36 retention/deletion policy, #38 likeness/IP/minors policy, and #39 revalidate GlobalStandard routing; #39 may invalidate the EU-only assumption behind the approval.
 
 📌 Team update (2026-07-28T10:14:07+02:00): Issue #37 scope changed. The user-facing notice must state that inference processing may occur outside the EU under GlobalStandard; any EU-only wording is factually wrong. Artifacts/storage remain in France Central/customer-designated storage. — decided by Benoit Moussaud
+
+### 2026-07-28T11:41:20+02:00 — Issue #41 accessible green palette revision
+- Owned Switch's rejected palette revision independently under reviewer lockout; Trinity did not participate.
+- Established original baseline contrast before changing taste: original coral and gold already failed on some/all surfaces, while Trinity's green introduced additional regressions for muted/result, coral, and gold.
+- Revised only palette/color values: sage-green backgrounds plus darker muted/coral/gold and shared line/border color so normal text clears 4.5:1 and icon/UI colors clear 3:1 across paper, surface, and result.
+- Updated the static CSS contract to the new palette and validated with the full unittest suite.

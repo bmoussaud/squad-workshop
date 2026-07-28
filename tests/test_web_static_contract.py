@@ -80,12 +80,12 @@ class WebStaticContractTests(unittest.TestCase):
                 ).group("path")
                 css = client.get(stylesheet_path).text.lower()
 
-        self.assertIn("--paper: #dff3df;", css)
-        self.assertIn("--surface: #f4fbf4;", css)
+        self.assertIn("--paper: #e4f1df;", css)
+        self.assertIn("--surface: #f7fcf4;", css)
         self.assertIn("background: var(--paper);", css)
         self.assertIn("background-color: var(--paper);", css)
-        self.assertIn("background: rgba(223, 243, 223, 0.96);", css)
-        self.assertIn("background: #d2ead2;", css)
+        self.assertIn("background: rgba(228, 241, 223, 0.96);", css)
+        self.assertIn("background: #d8ecd2;", css)
         outdated_paper = "#" + "f7" + "f3" + "e8"
         outdated_masthead = "rgba(" + ", ".join(("247", "243", "232"))
         self.assertNotIn(outdated_paper, css)
