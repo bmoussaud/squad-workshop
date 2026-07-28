@@ -59,3 +59,28 @@
 - **Advisory 2 (non-blocking, honesty):** teardown `matches="$(az group list ...)"` runs without `set -e`, so a real `az group list` failure is reported as `status=noop` success. Fails toward keep (safe), but masks an Azure error. Optionally distinguish az failure from empty result.
 - **Validation:** 53/53 reaper unit tests pass (independently run); allowlist ordering, boundary exit codes, closed-PR parsing, and `$GITHUB_OUTPUT` injection surface proved empirically across 13+ crafted cases; permissions/trigger/purge claims verified by reading the YAML and bicep. No committed secrets; no excluded terminology (author correctly uses "allowlist").
 - **Remediation status:** none required (Green). Two advisories optional.
+
+---
+
+## 2026-07-28 — Phase 5 (#18) per-PR child-resource identity tags — VERDICT: 🟡 YELLOW (advisories only, ship-able)
+
+**Scope reviewed:** commits `38ee838` + `6cba275` on `work` vs `origin/main`. Files: `infra/main.bicep` (new params `ephemeralTag`/`prNumberTag`/`authorTag`/`createdAtTag`, `baseTags`+`union` tag build), `infra/main.bicepparam` (4 `readEnvironmentVariable` bindings), `.github/workflows/pr-environment.yml` (new "Export per-PR child-resource identity tags" step).
+
+### 1. Destructive-action blast radius — 🟢 GREEN (no path to errant deletion)
+Proven empirically, three independent barriers stop a shared/dev/prod resource from being reaped via this change:
+- **Deletion tooling reads RESOURCE GROUPS only, never child-resource tags.** `pr_env_reaper.py:214-247` evaluates `az group list` entries; janitor `pr-environment-janitor.yml:100` and teardown `pr-environment-teardown.yml:128` and the concurrency cap `pr-environment.yml:250` all query `az group list`. The new params tag CHILD resources (via `var tags` → child modules `main.bicep:153`/`:176`), which no deletion tool ever inspects.
+- **The child tag subset omits the gate every deletion tool requires.** Reaper Gate 3 (`pr_env_reaper.py:225`) requires `environment-type == "pr-app"`; janitor/teardown/cap all AND `tags."environment-type"=='pr-app'`. The new subset is `ephemeral/pr-number/author/created-at` only — `environment-type` is deliberately EXCLUDED (`main.bicep:136`). A resource carrying `ephemeral=true` from this path can never satisfy the reap allowlist.
+- **`main.bicep` cannot tag its own RG.** `targetScope='resourceGroup'` (`main.bicep:1`); `var tags` flows only to child modules. RG-scope tags (the ones the reaper reads) are stamped exclusively by the workflow at `pr-environment.yml:308-315`, a separate `az tag update` path untouched by this change.
+- **Polluted-shell azd-local risk assessed seriously:** `main.bicepparam:10-13` read these via `readEnvironmentVariable`, so a dev exporting `EPHEMERAL_CHILD_TAG=true` and running `azd provision` into a shared RG WOULD cosmetically mislabel that RG's CHILD resources with `ephemeral=true`. But (a) the RG's own tags stay clean, (b) no deletion tool reads child tags, (c) `environment-type=pr-app` is still absent — so this is cosmetic pollution, NOT a destructive-action path. Recorded as Advisory 3.
+
+### 2. PII / sensitive data in tags — 🟡 YELLOW (advisory)
+`author` (GitHub login, `pr-environment.yml:172` from `github.event.pull_request.user.login`) and `created-at` become durable Azure child-resource metadata readable by anyone with subscription/RG read, and flow into cost exports + audit logs. GitHub login is already-public pseudonymous identity and the resources are nightly-ephemeral, so exposure is bounded — but stamping a person's identity onto cloud resources is a privacy choice worth an explicit owner sign-off. `created-at` is not PII. No other tag leaks more than intended (`expires-at`/`repo`/`branch` correctly excluded from children). Non-blocking per policy (PII → advisory).
+
+### 3. Untrusted input / injection — 🟢 GREEN (well-mitigated)
+`AUTHOR_TAG` is attacker-influenced but handled with the correct pattern: PR author is bound via `env:` (`pr-environment.yml:164` `PR_AUTHOR: ${{ ... }}`) and shell-expanded as `${PR_AUTHOR}` under `set -euo pipefail`, NOT interpolated as `${{ }}` into the run body — so no GitHub-Actions template/command injection. `$GITHUB_ENV` multiline-injection is infeasible: GitHub logins are constrained to `[A-Za-z0-9-]`, ≤39 chars, no newline/`=`/special chars, so no second env var can be smuggled in. Azure tag-value constraints (≤256 chars, no `<>%&\?/`) cannot be violated by a login, a numeric PR number, an ISO timestamp, or the literal `true`. `PR_NUMBER` is an integer from `github.event.pull_request.number`.
+
+### 4. Secret exposure — 🟡 YELLOW (pre-existing, out-of-scope, LOW-MEDIUM)
+`main.bicep:213` `output APPLICATIONINSIGHTS_CONNECTION_STRING string = ...` is NOT `@secure()`, so the App Insights connection string (embeds an ingestion InstrumentationKey) is persisted in ARM deployment history in plaintext, readable with RG-read. Pre-existing (not in this diff), so not a gate on this PR. Severity LOW-MEDIUM: it is an ingestion/telemetry key, not a data-plane read credential. Recommend a follow-up to mark it `@secure()`.
+
+**Remediation status:** none required to ship (no RED). Advisories 2/4 recommend follow-ups; Advisory 3 is defense-in-depth only.
+**Validation performed:** read reaper + all four RG-tag consumers; confirmed RG-vs-child scope split empirically; confirmed `environment-type` absent from child subset; confirmed `env:`-mapped author handling; confirmed `targetScope='resourceGroup'`. Did NOT re-run `az bicep build` or the compiled-ARM base-tag check (author pre-verified; accepted).

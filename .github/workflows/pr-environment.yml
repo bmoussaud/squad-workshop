@@ -160,6 +160,26 @@ jobs:
           echo "PLATFORM_IDENTITY_NAME=id-${CONTAINER_APPS_ENVIRONMENT_NAME}-plat" >> "$GITHUB_ENV"
           echo "APPLICATION_IDENTITY_NAME=id-${CONTAINER_APPS_ENVIRONMENT_NAME}-app" >> "$GITHUB_ENV"
 
+      - name: Export per-PR child-resource identity tags
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          # Stable identity tags propagated onto CHILD resources by main.bicep at
+          # provision time (this runs BEFORE `azd provision`). This is the drift-
+          # free subset of the resource-group tag set: `expires-at` is intentionally
+          # NOT exported because it is reset on the RG every deploy and is the only
+          # tag the TTL janitor reads (from the RG, never from child resources).
+          # author is attacker-influenced (PR author login) so it is passed via env
+          # and quoted, never interpolated from github.event.
+          {
+            echo "EPHEMERAL_CHILD_TAG=true"
+            echo "PR_NUMBER_TAG=${PR_NUMBER}"
+            echo "AUTHOR_TAG=${PR_AUTHOR}"
+            echo "CREATED_AT_TAG=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_ENV"
+
       - name: Configure shared bindings and required infra inputs
         env:
           SHARED_CONTAINER_REGISTRY_NAME: ${{ vars.SHARED_CONTAINER_REGISTRY_NAME }}

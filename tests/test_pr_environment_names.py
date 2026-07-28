@@ -185,8 +185,31 @@ class BicepparamContractTests(unittest.TestCase):
                 "managed_environment": "CONTAINER_APPS_ENVIRONMENT_NAME",
                 "virtual_network": "VIRTUAL_NETWORK_NAME",
                 "application_insights": "APPLICATION_INSIGHTS_NAME",
+                "log_analytics": "LOG_ANALYTICS_WORKSPACE_NAME",
             },
         )
+
+    def test_every_env_var_is_read_by_main_bicepparam(self) -> None:
+        # The workflow's authoritative "Compute names" step exports exactly the
+        # BICEPPARAM_ENV_VARS values via ``--format envvars``; the dedicated
+        # "Export per-PR observability names" step was removed (commit 6cba275)
+        # precisely because this envvars contract is the single path. That makes
+        # the dict<->bicepparam wiring load-bearing: if main.bicepparam stops
+        # reading one of these names, the PR-safe value silently never reaches
+        # Bicep and the resource falls back to the hardcoded dev default (a
+        # cross-PR collision). Nothing else pins this, so pin it here against the
+        # real file with a literal read expression per env-var name.
+        bicepparam = (SCRIPTS_DIR.parent / "main.bicepparam").read_text(
+            encoding="utf-8"
+        )
+        for field, env_var in naming.BICEPPARAM_ENV_VARS.items():
+            self.assertIn(
+                f"readEnvironmentVariable('{env_var}'",
+                bicepparam,
+                f"{field} -> {env_var} is exported by the naming step but never "
+                "read by infra/main.bicepparam; the PR-safe name will not reach "
+                "Bicep and the dev default will be used",
+            )
 
     def test_envvars_format_emits_bicepparam_names(self) -> None:
         import io
@@ -377,6 +400,75 @@ class ManagedEnvironmentCompactionTests(unittest.TestCase):
         names = naming.compute_names(REPO, 5, "squad/5-x")
         self.assertLessEqual(len(names.environment_name), 32)
         self.assertEqual(names.managed_environment, names.environment_name)
+
+
+class LogAnalyticsTests(unittest.TestCase):
+    """The deterministic Log Analytics workspace name (Phase 5).
+
+    Azure rule: length 4-63, alphanumerics and hyphens only, must start and end
+    with an alphanumeric character. The name mirrors the sibling 63-char names
+    (budget/action_group): the full ``pr-{n}-{slug}-{hash8}`` env name when it
+    fits, else the ``pr{n}-{hash8}`` compaction that always preserves ``hash8``.
+    """
+
+    _NAME_RE = r"^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+
+    def test_short_env_name_used_verbatim(self) -> None:
+        # pr-14-render-card-layout-<hash> is 33 chars (<= 63), so the workspace
+        # name is the full env name verbatim -- asserted against a literal.
+        names = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
+        self.assertEqual(
+            names.log_analytics,
+            f"pr-14-render-card-layout-{EXPECTED_PR14_HASH8}",
+        )
+        self.assertEqual(names.log_analytics, names.environment_name)
+
+    def test_is_deterministic(self) -> None:
+        first = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
+        second = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
+        self.assertEqual(first.log_analytics, second.log_analytics)
+
+    def test_exact_63_char_env_name_used_verbatim(self) -> None:
+        # slug length 48 makes the full env name exactly 63 chars
+        # ("pr-14-" = 6, slug = 48, "-" = 1, hash8 = 8), the boundary at which
+        # the name is still used verbatim rather than compacted.
+        slug = "a" * 48
+        names = naming.compute_names(REPO, 14, f"squad/14-{slug}")
+        self.assertEqual(len(names.environment_name), 63)
+        self.assertEqual(names.log_analytics, names.environment_name)
+        self.assertEqual(len(names.log_analytics), 63)
+        self.assertTrue(names.log_analytics.startswith(f"pr-14-{slug}-"))
+        self.assertRegex(names.log_analytics, self._NAME_RE)
+
+    def test_64_char_env_name_compacts_to_pr_token_plus_hash(self) -> None:
+        # slug length 49 pushes the full env name to 64 chars (> 63), so the
+        # workspace name must fall back to the pr{n}-{hash8} compaction.
+        slug = "a" * 49
+        names = naming.compute_names(REPO, 14, f"squad/14-{slug}")
+        self.assertEqual(len(names.environment_name), 64)
+        self.assertEqual(names.log_analytics, f"pr14-{names.hash8}")
+        self.assertLessEqual(len(names.log_analytics), 63)
+        self.assertRegex(names.log_analytics, self._NAME_RE)
+
+    def test_pathological_long_slug_never_overflows_63(self) -> None:
+        slugs = ["-".join(["seg"] * 25), "x" * 200]
+        for pr in (1, 14, 999999):
+            for slug in slugs:
+                names = naming.compute_names(REPO, pr, f"squad/{pr}-{slug}")
+                self.assertLessEqual(len(names.log_analytics), 63, names.log_analytics)
+                self.assertGreaterEqual(len(names.log_analytics), 4, names.log_analytics)
+                self.assertEqual(names.log_analytics, f"pr{pr}-{names.hash8}")
+                self.assertRegex(names.log_analytics, self._NAME_RE)
+
+    def test_appears_in_printable_and_envvars_output(self) -> None:
+        names = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
+        self.assertEqual(
+            names.printable_fields()["log_analytics"], names.log_analytics
+        )
+        self.assertEqual(
+            naming.BICEPPARAM_ENV_VARS["log_analytics"],
+            "LOG_ANALYTICS_WORKSPACE_NAME",
+        )
 
 
 class CliTests(unittest.TestCase):
