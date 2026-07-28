@@ -182,6 +182,7 @@ output openAiEndpoint string = 'https://${deployFoundry ? foundryAccount.outputs
 output applicationIdentityClientId string = applicationIdentity.outputs.clientId
 output applicationIdentityPrincipalId string = applicationIdentity.outputs.principalId
 output applicationIdentityResourceId string = applicationIdentity.outputs.resourceId
+@secure()
 output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
 output applicationInsightsResourceId string = applicationInsights.outputs.resourceId
 output logAnalyticsWorkspaceResourceId string = logAnalyticsWorkspace.outputs.resourceId

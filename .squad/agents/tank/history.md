@@ -19,6 +19,7 @@ Key retained history:
 
 ## Recent Updates
 
+- 2026-07-28T17:40:33.461+02:00 #34: `@secure()` must decorate the Application Insights connection-string outputs at both the Foundry module and root deployment boundaries. Bicep secure outputs require Bicep 0.35.1 or later; verify that the compiled ARM output type is `securestring`. The connection string remains available only through the existing secure Container App app-setting wiring, not `azd` or deployment outputs.
 - 2026-07-28 #45 preflight: Diagnosed `pr_preflight.py` exit 3 as an intentional `invalid_names` hard block for branches outside `squad/{issue}-{slug}`; workflow diagnostics now print helper output before enforcement.
 - 2026-07-28 #45 OIDC: Added Entra federated credential `github-pr-app-environment-immutable` on app `squad-workshop-pr-envs` for exact subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; deploy/teardown/janitor OIDC now authenticate.
 - 2026-07-28 #45 workload profile: PR environments use Container Apps `Consumption` workload profile semantics and omit dedicated min/max counts so scale-to-zero remains valid.

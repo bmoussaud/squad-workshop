@@ -275,6 +275,16 @@ class DeploymentContractTests(unittest.TestCase):
             }.issubset(outputs)
         )
 
+    def test_application_insights_connection_string_outputs_are_secure(self) -> None:
+        self.assertRegex(
+            self.foundry_bicep,
+            r"(?m)^@secure\(\)\s*\noutput applicationInsightsConnectionString string\b",
+        )
+        self.assertRegex(
+            self.main_bicep,
+            r"(?m)^@secure\(\)\s*\noutput APPLICATIONINSIGHTS_CONNECTION_STRING string\b",
+        )
+
     def test_storage_identity_and_rbac_are_private_and_least_privilege(self) -> None:
         storage = extract_bicep_block(self.web_bicep, "module", "storageAccount")
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")
