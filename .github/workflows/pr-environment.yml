@@ -17,8 +17,8 @@
 #     `github.event.pull_request.head.repo.fork` was a live fail-open bug.
 #  2. Privileged jobs independently re-assert the non-forgeable subset
 #     (not-fork, same-repo, non-draft) from GitHub event context before trusting
-#     any preflight output, because this `pull_request` workflow checks out PR
-#     head code and the scripts themselves are PR-supplied.
+#     any preflight output. The policy executables below are separately checked
+#     out from the immutable base SHA, while switch inspection reads PR content.
 #
 # `closed` teardown + daily TTL janitor are Phase 4 (#20);
 # budget/observability tuning is Phase 5 (#18). Phase 6 (#17 / #2) adds a
@@ -47,8 +47,8 @@ concurrency:
 
 jobs:
   # --- Gate: fork / draft / same-repo / name validity ------------------------
-  # No Azure permissions, no id-token. Consumes pr_preflight.py's full verdict;
-  # privileged jobs below still re-check the trusted event-context subset.
+  # No Azure permissions, no id-token. Executes base-ref policy code against PR
+  # metadata/content; privileged jobs below still re-check event-context trust.
   preflight:
     name: Preflight gate
     runs-on: ubuntu-latest
@@ -62,6 +62,14 @@ jobs:
       live_validation_requested: ${{ steps.scope.outputs.live_validation_requested }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Policy code must not come from the PR checkout. Keep the regular checkout
+      # above because the detector must inspect the PR's changed Bicep content.
+      - name: Check out trusted preflight policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-policy
 
       - name: Collect detector inputs
         id: detector-inputs
@@ -92,9 +100,10 @@ jobs:
           LABELS_FILE: ${{ steps.detector-inputs.outputs.labels_file }}
         run: |
           set -euo pipefail
-          python3 infra/scripts/pr_foundry_scope.py \
+          python3 .trusted-policy/infra/scripts/pr_foundry_scope.py \
             --changed-paths-file "$CHANGED_PATHS_FILE" \
             --labels-file "$LABELS_FILE" \
+            --repo-root . \
             --format github >> "$GITHUB_OUTPUT"
 
       - name: Evaluate deploy preflight
@@ -119,7 +128,7 @@ jobs:
           # cap because the post-login recheck re-runs pr_preflight with the real
           # count and fails the run on BLOCKED.
           set +e
-          output="$(python3 infra/scripts/pr_preflight.py \
+          output="$(python3 .trusted-policy/infra/scripts/pr_preflight.py \
             --repo "$BASE_REPO" \
             --pr-number "$PR_NUMBER" \
             --branch "$HEAD_BRANCH" \
@@ -182,9 +191,8 @@ jobs:
   # --- Deploy: OIDC login, provision, deploy, smoke --------------------------
   # id-token: write lives ONLY on this job (requirement #3). The job-level `if`
   # has trusted-context fork/same-repo/draft guards from the GitHub event payload
-  # before consulting preflight outputs, because preflight runs from PR head code.
-  # Follow-up: running detector/preflight from base-ref content would be stronger,
-  # but is intentionally out of scope for this Phase 6 ship fix.
+  # before consulting preflight outputs. This remains defense in depth even though
+  # the preflight/detector executables are checked out from the trusted base SHA.
   deploy:
     name: Provision and deploy
     needs: [preflight, foundry_exception]
