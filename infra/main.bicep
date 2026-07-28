@@ -9,8 +9,8 @@ param applicationLocation string = 'francecentral'
 @description('Short environment identifier applied to resource tags.')
 param environmentName string
 
-@description('Create a new Microsoft Foundry account/project/model deployment in this resource group. Defaults to true for main/prod; PR environments should set this to false and target the shared Foundry instance instead.')
-param deployFoundry bool = true
+@description('Create a new Microsoft Foundry account/project/model deployment in this resource group. Defaults to false; dev/main/prod deploy paths that provision Foundry must set DEPLOY_FOUNDRY=true explicitly.')
+param deployFoundry bool = false
 
 @description('Globally unique Microsoft Foundry account name.')
 param foundryAccountName string

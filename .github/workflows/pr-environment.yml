@@ -10,16 +10,20 @@
 # the base context and hand fork code write access + secrets -- exactly what we
 # refuse to do, including "just for the comment step".
 #
-# The fork / draft / same-repo / concurrency verdict is NOT re-implemented in
-# YAML. It is produced by infra/scripts/pr_preflight.py, whose strict-boolean
-# trust check exists precisely because truthiness coercion on
-# `github.event.pull_request.head.repo.fork` was a live fail-open bug. Fork PRs
-# are excluded at the JOB level: the deploy job only runs when the preflight job
-# emits decision == 'proceed', so a fork never reaches an Azure step.
+# Two-layer gate:
+#  1. infra/scripts/pr_preflight.py owns the full verdict and reason codes
+#     (name validity, fork/draft/same-repo, app cap, Foundry approval/cap). Its
+#     strict-boolean parsing exists because truthiness coercion on
+#     `github.event.pull_request.head.repo.fork` was a live fail-open bug.
+#  2. Privileged jobs independently re-assert the non-forgeable subset
+#     (not-fork, same-repo, non-draft) from GitHub event context before trusting
+#     any preflight output, because this `pull_request` workflow checks out PR
+#     head code and the scripts themselves are PR-supplied.
 #
-# Out of scope here (do not add): `closed` teardown + daily TTL janitor are
-# Phase 4 (#20); budget/observability tuning is Phase 5 (#18); the Foundry
-# approval gate is Phase 6 (#17 / #2). This workflow deploys the app tier only.
+# `closed` teardown + daily TTL janitor are Phase 4 (#20);
+# budget/observability tuning is Phase 5 (#18). Phase 6 (#17 / #2) adds a
+# detector-driven Foundry exception gate and opt-in live Foundry validation while
+# leaving the normal app-tier path automatic.
 
 name: PR Azure Environment
 
@@ -43,17 +47,55 @@ concurrency:
 
 jobs:
   # --- Gate: fork / draft / same-repo / name validity ------------------------
-  # No Azure permissions, no id-token. Consumes pr_preflight.py's verdict.
+  # No Azure permissions, no id-token. Consumes pr_preflight.py's full verdict;
+  # privileged jobs below still re-check the trusted event-context subset.
   preflight:
     name: Preflight gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       decision: ${{ steps.gate.outputs.decision }}
       reason_code: ${{ steps.gate.outputs.reason_code }}
+      requires_foundry: ${{ steps.scope.outputs.requires_foundry }}
+      live_validation_requested: ${{ steps.scope.outputs.live_validation_requested }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Collect detector inputs
+        id: detector-inputs
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number, per_page: 100,
+            });
+            const changedPaths = files.map((file) => file.filename);
+            const labels = (context.payload.pull_request.labels || []).map((label) => label.name);
+            const base = process.env.RUNNER_TEMP || process.cwd();
+            const changedPathsFile = path.join(base, 'pr-changed-paths.json');
+            const labelsFile = path.join(base, 'pr-labels.json');
+            fs.writeFileSync(changedPathsFile, `${changedPaths.join('\n')}\n`, { encoding: 'utf8' });
+            fs.writeFileSync(labelsFile, JSON.stringify(labels), { encoding: 'utf8' });
+            core.setOutput('changed_paths_file', changedPathsFile);
+            core.setOutput('labels_file', labelsFile);
+
+      - name: Detect Foundry scope and live validation label
+        id: scope
+        env:
+          CHANGED_PATHS_FILE: ${{ steps.detector-inputs.outputs.changed_paths_file }}
+          LABELS_FILE: ${{ steps.detector-inputs.outputs.labels_file }}
+        run: |
+          set -euo pipefail
+          python3 infra/scripts/pr_foundry_scope.py \
+            --changed-paths-file "$CHANGED_PATHS_FILE" \
+            --labels-file "$LABELS_FILE" \
+            --format github >> "$GITHUB_OUTPUT"
 
       - name: Evaluate deploy preflight
         id: gate
@@ -68,6 +110,7 @@ jobs:
           IS_DRAFT: ${{ github.event.pull_request.draft }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SHARED_ACR_NAME: ${{ vars.SHARED_CONTAINER_REGISTRY_NAME }}
+          REQUIRES_FOUNDRY: ${{ steps.scope.outputs.requires_foundry }}
         run: |
           set -uo pipefail
           # active-app-env-count is a documented pre-login placeholder (0): the
@@ -85,6 +128,9 @@ jobs:
             --head-repo "$HEAD_REPO" \
             --referenced-acr-name "$SHARED_ACR_NAME" \
             --active-app-env-count 0 \
+            --requires-foundry "$REQUIRES_FOUNDRY" \
+            --foundry-authorized false \
+            --active-foundry-env-count 0 \
             --format env)"
           printf '%s\n' "$output"
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
@@ -92,20 +138,57 @@ jobs:
           # visible run failure, while a SKIP (draft) exits cleanly.
 
       - name: Enforce verdict (BLOCKED fails the run, SKIP does not)
-        if: steps.gate.outputs.decision == 'blocked'
+        if: steps.gate.outputs.decision == 'blocked' && steps.gate.outputs.reason_code != 'foundry_unauthorized'
         env:
           REASON: ${{ steps.gate.outputs.reason_code }}
         run: |
           echo "::error::PR environment deploy refused by preflight (reason: ${REASON})."
           exit 1
 
+  # --- Foundry exception approval: only for detector-positive PRs --------------
+  # Referencing this environment pauses the run for configured GitHub reviewers.
+  # Approval is the only workflow signal that may turn foundry_authorized=true.
+  foundry_exception:
+    name: Approve Foundry exception
+    needs: preflight
+    if: >-
+      github.event.pull_request.head.repo.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      needs.preflight.outputs.requires_foundry == 'true' &&
+      needs.preflight.outputs.reason_code == 'foundry_unauthorized'
+    runs-on: ubuntu-latest
+    environment: azure-foundry-provisioning
+    permissions:
+      contents: read
+    outputs:
+      authorized: ${{ steps.approved.outputs.authorized }}
+    steps:
+      - name: Record approval signal
+        id: approved
+        run: |
+          set -euo pipefail
+          echo "authorized=true" >> "$GITHUB_OUTPUT"
+          echo "Foundry exception approved for this workflow run."
+
   # --- Deploy: OIDC login, provision, deploy, smoke --------------------------
-  # id-token: write lives ONLY on this job (requirement #3). Fork PRs never reach
-  # it because the job-level `if` requires a 'proceed' verdict.
+  # id-token: write lives ONLY on this job (requirement #3). The job-level `if`
+  # has trusted-context fork/same-repo/draft guards from the GitHub event payload
+  # before consulting preflight outputs, because preflight runs from PR head code.
+  # Follow-up: running detector/preflight from base-ref content would be stronger,
+  # but is intentionally out of scope for this Phase 6 ship fix.
   deploy:
     name: Provision and deploy
-    needs: preflight
-    if: needs.preflight.outputs.decision == 'proceed'
+    needs: [preflight, foundry_exception]
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      (needs.preflight.outputs.decision == 'proceed' ||
+        (needs.preflight.outputs.requires_foundry == 'true' &&
+          needs.preflight.outputs.reason_code == 'foundry_unauthorized' &&
+          needs.foundry_exception.result == 'success'))
     runs-on: ubuntu-latest
     environment: azure-pr-app
     permissions:
@@ -189,13 +272,16 @@ jobs:
           SHARED_FOUNDRY_RESOURCE_GROUP_NAME: ${{ vars.SHARED_FOUNDRY_RESOURCE_GROUP_NAME }}
           MODEL_DEPLOYMENT_NAME: ${{ vars.SHARED_MODEL_DEPLOYMENT_NAME }}
           ALERT_CONTACT_EMAILS: ${{ vars.AZURE_ALERT_CONTACT_EMAILS }}
+          FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          # PR environments bind to the shared ACR + shared Foundry and never
-          # provision either (design non-goals).
+          # Normal PR environments bind to the shared ACR + shared Foundry.
+          # Foundry provisioning is derived ONLY from the environment approval
+          # signal, not from path/label detection. Detection may request review;
+          # approval is what authorizes scarce, billable Foundry capacity.
           {
             echo "DEPLOY_ACR=false"
-            echo "DEPLOY_FOUNDRY=false"
+            echo "DEPLOY_FOUNDRY=${FOUNDRY_AUTHORIZED}"
             echo "SHARED_CONTAINER_REGISTRY_NAME=${SHARED_CONTAINER_REGISTRY_NAME}"
             echo "SHARED_CONTAINER_REGISTRY_RESOURCE_GROUP_NAME=${SHARED_CONTAINER_REGISTRY_RESOURCE_GROUP_NAME}"
             echo "SHARED_FOUNDRY_ACCOUNT_NAME=${SHARED_FOUNDRY_ACCOUNT_NAME}"
@@ -242,6 +328,8 @@ jobs:
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SHARED_ACR_NAME: ${{ vars.SHARED_CONTAINER_REGISTRY_NAME }}
+          REQUIRES_FOUNDRY: ${{ needs.preflight.outputs.requires_foundry }}
+          FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
         run: |
           set -uo pipefail
           # Count active app-tier PR environments by tag, excluding this PR's own
@@ -249,6 +337,11 @@ jobs:
           # validated integer read from env, not interpolated from github.event.
           active="$(az group list --query "length([?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app' && tags.\"pr-number\"!='${PR_NUMBER}'])" -o tsv)"
           echo "Active app-tier PR environments (excluding this PR): ${active}"
+          active_foundry=0
+          if [ "$REQUIRES_FOUNDRY" = "true" ]; then
+            active_foundry="$(az group list --query "length([?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-foundry' && tags.\"pr-number\"!='${PR_NUMBER}'])" -o tsv)"
+            echo "Active Foundry exception PR environments (excluding this PR): ${active_foundry}"
+          fi
           # Authoritative cap check via pr_preflight (fails closed at 3). BLOCKED
           # -> non-zero exit -> the run fails before we provision anything.
           output="$(python3 infra/scripts/pr_preflight.py \
@@ -261,6 +354,9 @@ jobs:
             --head-repo "$HEAD_REPO" \
             --referenced-acr-name "$SHARED_ACR_NAME" \
             --active-app-env-count "$active" \
+            --requires-foundry "$REQUIRES_FOUNDRY" \
+            --foundry-authorized "$FOUNDRY_AUTHORIZED" \
+            --active-foundry-env-count "$active_foundry" \
             --format env)"
           rc=$?
           printf '%s\n' "$output"
@@ -268,6 +364,55 @@ jobs:
             echo "::error::App-tier concurrency cap or safety check failed; refusing to provision."
             exit 1
           fi
+
+      - name: Assert Foundry provisioning switch integrity
+        env:
+          FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import sys
+
+          bicepparam = Path("infra/main.bicepparam").read_text(encoding="utf-8")
+          main_bicep = Path("infra/main.bicep").read_text(encoding="utf-8")
+
+          switch_pattern = re.compile(
+              r"(?m)^\s*param\s+deployFoundry\s*=\s*bool\s*\(\s*"
+              r"readEnvironmentVariable\s*\(\s*'DEPLOY_FOUNDRY'\s*,\s*'false'\s*\)\s*\)\s*$"
+          )
+          if not switch_pattern.search(bicepparam):
+              print(
+                  "::error::infra/main.bicepparam must source deployFoundry from "
+                  "DEPLOY_FOUNDRY with fail-closed default 'false'."
+              )
+              sys.exit(1)
+
+          module_wiring_pattern = re.compile(
+              r"(?s)module\s+foundry\s+'foundry\.bicep'\s*=\s*\{.*?"
+              r"params\s*:\s*\{.*?deployFoundry\s*:\s*deployFoundry\b"
+          )
+          if not module_wiring_pattern.search(main_bicep):
+              print(
+                  "::error::infra/main.bicep must pass the deployFoundry switch "
+                  "through to foundry.bicep without hardcoding it."
+              )
+              sys.exit(1)
+
+          authorized = os.environ["FOUNDRY_AUTHORIZED"] == "true"
+          effective = os.environ.get("DEPLOY_FOUNDRY", "")
+          expected = "true" if authorized else "false"
+          if effective != expected:
+              print(
+                  f"::error::DEPLOY_FOUNDRY effective value is {effective!r}; "
+                  f"expected {expected!r} for this approval state."
+              )
+              sys.exit(1)
+
+          print(f"Foundry switch integrity verified; DEPLOY_FOUNDRY={effective}.")
+          PY
 
       - name: Initialize azd environment
         run: |
@@ -305,9 +450,13 @@ jobs:
           rg_id="$(az group show -n "$rg" --query id -o tsv)"
           created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           expires="$(date -u -d '+7 days' +%Y-%m-%dT%H:%M:%SZ)"
+          environment_type="pr-app"
+          if [ "${DEPLOY_FOUNDRY}" = "true" ]; then
+            environment_type="pr-foundry"
+          fi
           az tag update --resource-id "$rg_id" --operation merge --tags \
             ephemeral=true \
-            environment-type=pr-app \
+            environment-type="$environment_type" \
             pr-number="$PR_NUMBER" \
             author="$PR_AUTHOR" \
             created-at="$created" \
@@ -361,13 +510,117 @@ jobs:
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
           exit $rc
 
+  # --- Optional live Foundry validation: sanitized pass/fail evidence only ----
+  live_foundry_validation:
+    name: Live Foundry validation
+    needs: [preflight, deploy]
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      needs.preflight.outputs.live_validation_requested == 'true' &&
+      needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.validate.outputs.result }}
+      correlation_id: ${{ steps.validate.outputs.correlation_id }}
+    steps:
+      - name: Exercise sanitized gpt-image-2 card-generation path
+        id: validate
+        env:
+          APP_URL: ${{ needs.deploy.outputs.app_url }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          app_url = os.environ["APP_URL"].rstrip("/")
+          correlation_id = f"live-foundry-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          payload = {
+              "title": "Live validation",
+              "description": "A safe non-branded fantasy character portrait for infrastructure validation.",
+          }
+
+          def record(result: str) -> None:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"result={result}\n")
+                  output.write(f"correlation_id={correlation_id}\n")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("## Live Foundry validation\n\n")
+                  summary.write(f"- Result: {result}\n")
+                  summary.write(f"- Correlation ID: `{correlation_id}`\n")
+
+          request = urllib.request.Request(
+              f"{app_url}/api/generations",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                  "X-Correlation-ID": correlation_id,
+                  "Idempotency-Key": correlation_id,
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=180) as response:
+                  status_code = response.status
+                  response_body = response.read(65536)
+          except urllib.error.HTTPError as error:
+              record("failed")
+              print(
+                  f"::error::Live Foundry validation failed (HTTP {error.code}; correlation_id={correlation_id})."
+              )
+              sys.exit(1)
+          except urllib.error.URLError:
+              record("failed")
+              print(
+                  f"::error::Live Foundry validation failed (transport error; correlation_id={correlation_id})."
+              )
+              sys.exit(1)
+
+          try:
+              document = json.loads(response_body)
+          except json.JSONDecodeError:
+              record("failed")
+              print(
+                  f"::error::Live Foundry validation failed (non-JSON response; correlation_id={correlation_id})."
+              )
+              sys.exit(1)
+
+          if (
+              status_code != 200
+              or document.get("status") != "succeeded"
+              or document.get("correlation_id") != correlation_id
+          ):
+              record("failed")
+              print(
+                  f"::error::Live Foundry validation failed (unexpected result; correlation_id={correlation_id})."
+              )
+              sys.exit(1)
+
+          record("passed")
+          print(f"Live Foundry validation passed; correlation_id={correlation_id}")
+          PY
+
   # --- Comment: single find-and-update PR comment ----------------------------
   # pull-requests: write lives ONLY on this job. Runs after a real deploy attempt
   # (always()) so it reports pass OR fail, but never for fork/draft (skip).
   comment:
     name: Update PR comment
-    needs: [preflight, deploy]
-    if: always() && needs.preflight.outputs.decision == 'proceed'
+    needs: [preflight, deploy, live_foundry_validation]
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      needs.deploy.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -382,6 +635,10 @@ jobs:
           SMOKE_MESSAGE: ${{ needs.deploy.outputs.smoke_message }}
           EXPIRES_AT: ${{ needs.deploy.outputs.expires_at }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          LIVE_VALIDATION_REQUESTED: ${{ needs.preflight.outputs.live_validation_requested }}
+          LIVE_VALIDATION_RESULT: ${{ needs.live_foundry_validation.result }}
+          LIVE_VALIDATION_STATUS: ${{ needs.live_foundry_validation.outputs.result }}
+          LIVE_VALIDATION_CORRELATION_ID: ${{ needs.live_foundry_validation.outputs.correlation_id }}
         with:
           script: |
             // All dynamic content comes from process.env (set above from job
@@ -421,6 +678,13 @@ jobs:
               ? `**App URL:** ${appUrl}`
               : '**App URL:** _not available (deployment did not reach a running app)_';
 
+            const evidenceLines = [];
+            if (process.env.LIVE_VALIDATION_REQUESTED === 'true') {
+              const liveStatus = process.env.LIVE_VALIDATION_STATUS || process.env.LIVE_VALIDATION_RESULT || 'unknown';
+              const liveCorrelation = process.env.LIVE_VALIDATION_CORRELATION_ID || '(unavailable)';
+              evidenceLines.push(`**Live Foundry validation:** ${liveStatus} — correlation ID \`${liveCorrelation}\``);
+            }
+
             const body = [
               marker,
               '## 🌩️ PR Azure environment',
@@ -428,6 +692,7 @@ jobs:
               appLine,
               `**Environment:** \`${envName}\``,
               `**Health:** ${health}`,
+              ...evidenceLines,
               `**Expires:** ${expiresAt}`,
               '',
               `[View workflow run logs](${runUrl})`,

@@ -20,3 +20,5 @@ Agent Fact Checker initialized and ready for work.
 Initial setup complete.
 
 📌 Team update (2026-07-27T14:24:13+02:00): Your verified Container Apps rule is now enforced. Cross-agent outcomes: `web.bicep` has not yet consumed Tank’s names (Phase 3/#15 owns the parameter seam), and Rai’s RED preflight review completed the required independent Morpheus remediation and GREEN re-approval at 148 tests.
+
+📌 Team update (2026-07-28T09:03:21Z): Fork-OIDC exploitability was checked against GitHub docs; fork PRs cannot elevate to `id-token`, so the fork-guard issue is defense-in-depth rather than active credential exfiltration — decided by Fact Checker.

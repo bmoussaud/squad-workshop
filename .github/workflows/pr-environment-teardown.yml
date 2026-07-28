@@ -5,8 +5,10 @@
 #
 # This is the cost-critical half of the lifecycle: a merged or abandoned PR must
 # have its Azure environment destroyed immediately, otherwise it bills forever.
-# The daily janitor (pr-environment-janitor.yml) is only the backstop; this
-# workflow is the primary reclaim path.
+# This close event is also the authoritative reclaim path for gated Foundry
+# exceptions: unlike TTL expiry, PR closure is an explicit lifecycle event. The
+# daily janitor auto-deletes app-tier leaks only; it surfaces Foundry exception
+# leaks for operator cleanup rather than inferring deletion from TTL alone.
 #
 # SECURITY MODEL (why this uses `pull_request`, never `pull_request_target`):
 # identical to the deploy workflow (pr-environment.yml). `pull_request` runs in
@@ -51,8 +53,8 @@ permissions:
 # instead. Net effect: once a teardown starts, it runs to completion. Teardown
 # wins. The only residual race (a deploy still provisioning into the same RG
 # while teardown deletes it) ends with the group deleted either way, and is
-# additionally backstopped by the daily janitor, which reaps by the immutable
-# `pr-number`/`expires-at` tags.
+# additionally backstopped by the daily janitor for app-tier groups and by
+# warning annotations for Foundry exception groups.
 concurrency:
   group: pr-azure-teardown-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -96,15 +98,15 @@ jobs:
           #    from `azd env new` alone, so `azd down` here would be fragile.
           #  * The RG already carries the immutable identity tags this teardown
           #    (and the janitor's reaper) trust: ephemeral=true,
-          #    environment-type=pr-app, pr-number=<n>. Selecting by ALL THREE is
-          #    an allowlist: a matched group is positively proven to be THIS PR's
-          #    ephemeral app environment, so the delete can never hit an untagged
-          #    or wrongly-tagged group.
+          #    environment-type in {pr-app, pr-foundry}, pr-number=<n>. Selecting
+          #    by ALL THREE is an allowlist: a matched group is positively proven
+          #    to be THIS PR's ephemeral environment, so the delete can never hit
+          #    an untagged or wrongly-tagged group.
           #  * `--purge` exists only to reclaim soft-deleted Key Vault / Cognitive
-          #    Services. Per design, PR stacks set DEPLOY_FOUNDRY=false, use the
-          #    SHARED Foundry, and contain no per-PR Key Vault -- so there is
-          #    nothing soft-deleted to purge, and `az group delete` is
-          #    functionally equivalent to `azd down --purge` for this stack.
+          #    Services. Routine PR stacks set DEPLOY_FOUNDRY=false, use the
+          #    SHARED Foundry, and contain no per-PR Key Vault. Gated Foundry
+          #    exception stacks are still resource-group scoped; deleting the
+          #    exact PR-tagged group is the deterministic cap-release path.
           #
           # PR_NUMBER is safe by PROVENANCE (GitHub emits
           # github.event.pull_request.number as an integer, not attacker-
@@ -123,14 +125,19 @@ jobs:
           # leaking the resource group. Capture the exit status explicitly and
           # fail the step loudly on a genuine query failure.
           matches=""
+          matches_json=""
           query_rc=0
-          matches="$(az group list \
-            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-app' && tags.\"pr-number\"=='${PR_NUMBER}'].name" \
-            -o tsv)" || query_rc=$?
+          matches_json="$(az group list \
+            --query "[?tags.ephemeral=='true' && tags.\"pr-number\"=='${PR_NUMBER}']" \
+            -o json)" || query_rc=$?
           if [ "${query_rc}" -ne 0 ]; then
             echo "::error::az group list failed (exit ${query_rc}); cannot determine teardown target. Failing loudly rather than reporting a false no-op."
             exit 1
           fi
+          matches="$(printf '%s' "${matches_json}" | python3 -c "import json, sys; groups = json.load(sys.stdin); allowed = {'pr-app', 'pr-foundry'}; print('\n'.join(group.get('name', '') for group in groups if isinstance(group.get('tags'), dict) and group['tags'].get('environment-type') in allowed and group.get('name')))" )" || {
+            echo "::error::Could not parse Azure resource-group list for teardown."
+            exit 1
+          }
 
           # IDEMPOTENCY: an empty match set (query SUCCEEDED, returned nothing) is
           # the expected no-op, NOT a failure.
@@ -138,7 +145,7 @@ jobs:
           # (draft / fork / preflight-blocked), the group was already deleted, or
           # a previous teardown completed. Exit 0.
           if [ -z "${matches}" ]; then
-            echo "No ephemeral pr-app resource group tagged pr-number=${PR_NUMBER}; nothing to tear down."
+            echo "No ephemeral pr-app/pr-foundry resource group tagged pr-number=${PR_NUMBER}; nothing to tear down."
             echo "status=noop" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -205,7 +212,7 @@ jobs:
             } else if (result === 'success' && status === 'noop') {
               line = '🧹 Nothing to tear down — no ephemeral Azure environment was found for this PR.';
             } else {
-              line = '⚠️ Teardown did not complete — the ephemeral Azure environment may still exist. The daily janitor will reclaim it; see the run logs.';
+              line = '⚠️ Teardown did not complete — the ephemeral Azure environment may still exist. App-tier leaks are janitor-backed; Foundry exceptions are surfaced for operator cleanup. See the run logs.';
             }
 
             const body = [
@@ -216,7 +223,7 @@ jobs:
               '',
               `[View teardown run logs](${runUrl})`,
               '',
-              '<sub>Ephemeral app-tier environment lifecycle. Backstopped by the daily TTL janitor.</sub>',
+              '<sub>Ephemeral environment lifecycle. App-tier TTL is auto-reaped; Foundry exceptions are closed by PR teardown and alerted by the janitor.</sub>',
             ].join('\n');
 
             const comments = await github.paginate(github.rest.issues.listComments, {

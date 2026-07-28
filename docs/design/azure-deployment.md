@@ -86,7 +86,7 @@ Use Azure Developer CLI (`azd`) as the primary application deployment lifecycle 
 
 For an interactive shell, authenticate with `azd auth login` first. Use `az login` only when Azure CLI context is specifically required, not as an alternative imperative provisioning workflow. Configure the target environment and subscription explicitly; authentication alone does not select the deployment subscription.
 
-Prefer `azd` lifecycle commands for application deployment. Run `azd provision --preview` before `azd provision` or `azd up`, then proceed only after reviewing the proposed changes.
+Prefer `azd` lifecycle commands for application deployment. Run `azd provision --preview` before `azd provision` or `azd up`, then proceed only after reviewing the proposed changes. Foundry provisioning is fail-closed in Bicep: any non-PR dev/main/prod run that intentionally creates or updates the long-lived Foundry account/project/model deployment must set `DEPLOY_FOUNDRY=true` explicitly before preview/provision.
 
 ## Assumptions to Validate
 

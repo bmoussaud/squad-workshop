@@ -2,8 +2,8 @@ targetScope = 'resourceGroup'
 
 param location string
 param tags object
-@description('Create a new Microsoft Foundry account/project/model deployment. Set to false for PR environments that target the shared Foundry instance instead.')
-param deployFoundry bool = true
+@description('Create a new Microsoft Foundry account/project/model deployment. Defaults to false; callers that provision Foundry must set this explicitly.')
+param deployFoundry bool = false
 param foundryAccountName string
 param foundryProjectName string
 @description('Existing shared Microsoft Foundry account name. Required when deployFoundry is false.')

@@ -17,6 +17,11 @@ All three workflows run their OIDC-authenticated job under GitHub Environment
 Because all three declare `environment: azure-pr-app` on the job holding
 `id-token: write`, a **single** federated credential covers all three.
 
+The deploy workflow also references GitHub Environment
+`azure-foundry-provisioning` for detector-positive Foundry exception PRs. That
+job is an approval checkpoint only; it does **not** request `id-token: write` and
+does not need a second Entra federated credential.
+
 ## 1. Entra app registration + federated credential
 
 - App registration display name: `squad-workshop-pr-envs`
@@ -60,7 +65,7 @@ az role assignment create --assignee-object-id $SP --assignee-principal-type Ser
 az role assignment create --assignee-object-id $SP --assignee-principal-type ServicePrincipal --role "Role Based Access Control Administrator" --scope $SUB
 ```
 
-## 3. GitHub Environment
+## 3. GitHub Environments
 
 Create `azure-pr-app` with **no required reviewers and no branch restrictions**.
 A reviewer gate would block the automated teardown and janitor — the opposite of
@@ -68,6 +73,35 @@ what we want.
 
 ```bash
 echo '{}' | gh api --method PUT repos/bmoussaud/squad-workshop/environments/azure-pr-app --input -
+```
+
+Create `azure-foundry-provisioning` with a required reviewer gate. Approving
+this environment authorizes a rare, billable Foundry-per-PR exception: the run may
+provision or change scarce `gpt-image-2` capacity/model/RBAC/region/safety paths,
+subject to the workflow's one-active-Foundry-environment preflight cap. It does
+not authorize prompts, generated image bytes, provider internals, tenant-bearing
+endpoints, or credentials to be printed in logs or PR comments.
+
+Design deviation: the design originally said required reviewers should be
+"Benoit plus Tank or Morpheus". GitHub required reviewers must be real users or
+teams; Tank and Morpheus are AI agents, and `bmoussaud` is currently the only
+collaborator. Configure `bmoussaud` as the sole required reviewer and **do not**
+enable "prevent self-review"; otherwise Benoit's own PRs would be permanently
+unapprovable.
+
+```bash
+USER_ID=$(gh api users/bmoussaud --jq .id)
+cat > foundry-environment.json <<EOF
+{
+  "wait_timer": 0,
+  "reviewers": [
+    { "type": "User", "id": ${USER_ID} }
+  ],
+  "prevent_self_review": false
+}
+EOF
+gh api --method PUT repos/bmoussaud/squad-workshop/environments/azure-foundry-provisioning --input foundry-environment.json
+rm foundry-environment.json
 ```
 
 ## 4. Repository Actions variables (not secrets)
@@ -111,9 +145,81 @@ python infra/scripts/pr_preflight.py \
   --is-fork false --is-draft false \
   --base-repo bmoussaud/squad-workshop --head-repo bmoussaud/squad-workshop \
   --referenced-acr-name acrfantasycardsnrp2z4rl3jd32 \
-  --active-app-env-count 0 --format env
+  --active-app-env-count 0 \
+  --requires-foundry false --foundry-authorized false --active-foundry-env-count 0 \
+  --format env
 # -> decision=proceed / reason_code=ok
 ```
 
 With an empty ACR name (the pre-configuration state) the same command returns
 `reason_code=invalid_service_name` — that was the original blocker.
+
+For a Foundry-scoped PR, the first preflight pass should return
+`reason_code=foundry_unauthorized`; the workflow treats only that reason as
+approval-pending and routes to `azure-foundry-provisioning`. After approval and
+Azure login, the second preflight pass uses `--foundry-authorized true` plus the
+live count of existing `environment-type=pr-foundry` resource groups. That second
+pass is the authoritative no-bypass gate before `azd provision`.
+
+Important trust boundary: the deploy workflow currently checks out PR head code,
+so preflight and detector outputs are not trusted by themselves. Jobs that hold
+OIDC credentials, approval authority, live validation, or PR-comment write access
+also require GitHub event-context guards at the job level:
+
+- `github.event.pull_request.head.repo.fork == false`
+- `github.event.pull_request.head.repo.full_name == github.repository`
+- `github.event.pull_request.draft == false`
+
+Do not remove those guards when refactoring preflight. A future hardening issue
+may run detector/preflight from base-ref content, but the job-level guards remain
+the immediate non-forgeable boundary for forks and drafts.
+
+The deploy workflow sets `DEPLOY_FOUNDRY=true` only when the
+`azure-foundry-provisioning` approval job succeeds. Detection alone never
+provisions Foundry; a detector false positive can at most request approval. Before
+`azd provision`, the workflow also verifies the PR-controlled IaC has not
+neutralized the switch: `infra/main.bicepparam` must read `deployFoundry` from
+`DEPLOY_FOUNDRY` with default `'false'`, and `infra/main.bicep` must pass that
+parameter through to `foundry.bicep`.
+
+## 6. Foundry exception teardown and cap recovery
+
+Foundry exception resource groups are tagged `environment-type=pr-foundry` so the
+deploy workflow can enforce `FOUNDRY_CONCURRENCY_CAP=1` by counting active
+exception groups. That cap only works if the count can return to zero.
+
+Teardown policy:
+
+- **Close-time teardown deletes both `pr-app` and `pr-foundry` groups** for the
+  exact closed PR number. PR closure is an explicit lifecycle event, so this is
+  the deterministic reclaim path for billable/scarce Foundry capacity.
+- **The daily TTL janitor auto-deletes only `pr-app` groups.** It deliberately
+  does not infer deletion of `pr-foundry` groups from TTL alone, because
+  cost-bearing Foundry/model/RBAC resources deserve operator review before an
+  inferred cleanup action.
+- The janitor still queries `pr-foundry` groups and emits workflow warnings plus a
+  step-summary table when one is expired, has malformed expiry metadata, or is
+  tied to a recently closed PR. Treat those warnings as manual cleanup tickets.
+
+If a Foundry exception PR was closed and future exceptions remain blocked by
+`foundry_concurrency_cap`, first inspect the close-time teardown run for that PR.
+If the run failed, delete only the resource group tagged with that PR's
+`pr-number`, `ephemeral=true`, and `environment-type=pr-foundry`; then rerun the
+preflight.
+
+## 7. Non-PR Foundry provisioning is explicit
+
+`infra/main.bicepparam`, `infra/main.bicep`, and `infra/foundry.bicep` all fail
+closed for Foundry provisioning. Manual dev/main/prod runs that intentionally
+create or update the long-lived Foundry account/project/model deployment must set:
+
+```bash
+export DEPLOY_FOUNDRY=true
+azd provision --preview
+azd provision
+```
+
+No current GitHub workflow depends on the old permissive default. The only
+automated workflow that runs `azd provision` is the PR environment workflow, and
+it now derives `DEPLOY_FOUNDRY` from the Foundry approval job rather than from
+path/label detection.
