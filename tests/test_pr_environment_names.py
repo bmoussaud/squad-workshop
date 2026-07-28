@@ -62,9 +62,20 @@ class SlugExtractionTests(unittest.TestCase):
         )
 
     def test_rejects_non_squad_branch(self) -> None:
-        for branch in ("main", "feature/x", "squad/render-card", "squad/0-x"):
+        for branch in (
+            "main",
+            "feature/x",
+            "squad/render-card",
+            "squad/0-x",
+            "squad-1-x",
+            "anything-squad/1-x",
+        ):
             with self.assertRaises(ValueError):
                 naming.slug_from_branch(branch)
+
+    def test_rejects_copilot_branch_for_a_different_repository_owner(self) -> None:
+        with self.assertRaises(ValueError):
+            naming.compute_names(REPO, 14, "my-squad-1-x")
 
     def test_rejects_empty_slug_after_sanitization(self) -> None:
         with self.assertRaises(ValueError):

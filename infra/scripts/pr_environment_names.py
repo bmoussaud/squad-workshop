@@ -93,8 +93,8 @@ MANAGED_ENVIRONMENT_DEFENSIVE_MAX = 32
 APP_PREFIX = "fc"
 
 _BRANCH_RE = re.compile(
-    r"^(?:(?P<owner>[a-z0-9][a-z0-9-]*)-)?"
-    r"squad(?:/|-)(?P<issue>[1-9][0-9]*)-(?P<slug>.+)$"
+    r"^(?:squad/|(?P<owner>[a-z0-9][a-z0-9-]*)-squad-)"
+    r"(?P<issue>[1-9][0-9]*)-(?P<slug>.+)$"
 )
 _SLUG_ALLOWED_RE = re.compile(r"[^a-z0-9-]+")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
@@ -121,13 +121,14 @@ def _sanitize_log(text: str) -> str:
     return _LOG_UNSAFE_RE.sub(" ", text)
 
 
-def slug_from_branch(branch: str) -> str:
+def slug_from_branch(branch: str, *, expected_owner: str | None = None) -> str:
     """Extract and sanitize the meaningful slug from a supported Squad branch.
 
     The canonical form is ``squad/{issue}-{slug}``. Copilot App's
     ``rename_branch`` tool prepends the owner and replaces the slash with a
     hyphen, so its equivalent ``{owner}-squad-{issue}-{slug}`` form is accepted
-    as well.
+    as well. When ``expected_owner`` is supplied, owner-prefixed branches must
+    use that exact repository owner.
 
     Raises ``ValueError`` for any branch that does not follow the convention or
     that yields an empty slug after sanitization.
@@ -140,6 +141,9 @@ def slug_from_branch(branch: str) -> str:
             f"branch {branch!r} does not follow the required "
             "'squad/{issue}-{slug}' or '{owner}-squad-{issue}-{slug}' convention"
         )
+    owner = match.group("owner")
+    if owner is not None and expected_owner is not None and owner != expected_owner.lower():
+        raise ValueError("owner-prefixed branch does not match the repository owner")
     return sanitize_slug(match.group("slug"))
 
 
@@ -423,7 +427,10 @@ def compute_names(repo: str, pr_number: int, branch: str) -> PrEnvironmentNames:
     within its Azure limit.
     """
     _validate_pr_number(pr_number)
-    slug = slug_from_branch(branch)
+    owner, separator, repository_name = repo.partition("/")
+    if not separator or not owner or not repository_name:
+        raise ValueError("repo must be in canonical 'owner/repo' form")
+    slug = slug_from_branch(branch, expected_owner=owner)
     digest = hash8(repo, pr_number, slug)
     env = environment_name(pr_number, slug, digest)
     managed_environment = _compact_or_full(

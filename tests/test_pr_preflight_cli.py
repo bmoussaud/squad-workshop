@@ -105,6 +105,11 @@ class PreflightCliDecisionTests(unittest.TestCase):
         self.assertEqual(fields["decision"], "proceed")
         self.assertEqual(fields["reason_code"], "ok")
 
+    def test_copilot_app_branch_with_different_owner_blocks(self) -> None:
+        code, fields = _run(**{"--branch": "my-squad-1-x"})
+        self.assertEqual(code, preflight.BLOCKED_EXIT_CODE)
+        self.assertEqual(fields["reason_code"], "invalid_names")
+
 
 class PreflightCliFailClosedTests(unittest.TestCase):
     """A malformed trust signal must never be coerced to a permissive answer."""
