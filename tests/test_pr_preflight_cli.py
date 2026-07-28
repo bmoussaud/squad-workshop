@@ -179,6 +179,63 @@ class PreflightCliFailClosedTests(unittest.TestCase):
         self.assertEqual(skip["decision"], "skip")
 
 
+class PreflightFoundryGateOrderTests(unittest.TestCase):
+    def test_security_gates_precede_foundry_exception_gate(self) -> None:
+        # pr-environment.yml allows deploy after the manual Foundry gate based on
+        # reason_code == foundry_unauthorized. That remains safe only if all
+        # credential-bearing security/cost gates run before the Foundry check.
+        cases = (
+            (
+                "fork",
+                {"--is-fork": "true", "--head-repo": "attacker/squad-workshop"},
+                preflight.BLOCKED_EXIT_CODE,
+                "blocked",
+                "fork_pr",
+            ),
+            (
+                "untrusted-repo",
+                {"--head-repo": "attacker/squad-workshop"},
+                preflight.BLOCKED_EXIT_CODE,
+                "blocked",
+                "untrusted_repo",
+            ),
+            (
+                "draft",
+                {"--is-draft": "true"},
+                0,
+                "skip",
+                "draft_pr",
+            ),
+            (
+                "invalid-name",
+                {"--branch": "not-a-squad-branch"},
+                preflight.BLOCKED_EXIT_CODE,
+                "blocked",
+                "invalid_names",
+            ),
+            (
+                "app-cap",
+                {"--active-app-env-count": "3"},
+                preflight.BLOCKED_EXIT_CODE,
+                "blocked",
+                "app_concurrency_cap",
+            ),
+        )
+        for name, overrides, expected_code, expected_decision, expected_reason in cases:
+            with self.subTest(name=name):
+                code, fields = _run(
+                    **{
+                        "--requires-foundry": "true",
+                        "--foundry-authorized": "false",
+                        **overrides,
+                    }
+                )
+                self.assertEqual(code, expected_code)
+                self.assertEqual(fields["decision"], expected_decision)
+                self.assertEqual(fields["reason_code"], expected_reason)
+                self.assertNotEqual(fields["reason_code"], "foundry_unauthorized")
+
+
 class PreflightCliOutputSafetyTests(unittest.TestCase):
     def test_env_format_emits_three_known_keys(self) -> None:
         buffer = io.StringIO()

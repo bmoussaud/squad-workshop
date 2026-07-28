@@ -4,6 +4,10 @@
 # "Cost & lifecycle" ~L165-170). Mandatory backstop cleanup for environments the
 # close-time teardown (pr-environment-teardown.yml) missed: failed close
 # workflows, deleted branches, or any resource group that leaked past its TTL.
+# Gated Foundry exception groups (`environment-type=pr-foundry`) are NOT
+# auto-deleted by TTL inference; the explicit PR close event tears them down, and
+# this janitor only surfaces any Foundry groups that still look expired or tied to
+# closed PRs.
 #
 # PRODUCT DECISION (already made): the janitor DELETES IMMEDIATELY on expiry.
 # There is no mark-then-delete grace period.
@@ -111,6 +115,78 @@ jobs:
             --format env)"
           printf '%s\n' "${reap_out}"
           printf '%s\n' "${reap_out}" >> "$GITHUB_OUTPUT"
+
+      - name: Surface Foundry exceptions needing operator cleanup
+        env:
+          CLOSED_PRS: ${{ steps.closed.outputs.closed_prs }}
+        run: |
+          set -euo pipefail
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          foundry_groups="$(az group list \
+            --query "[?tags.ephemeral=='true' && tags.\"environment-type\"=='pr-foundry']" \
+            -o json)"
+          export FOUNDRY_GROUPS_JSON="${foundry_groups}"
+          export NOW
+          python3 - <<'PY'
+          from datetime import datetime, timezone
+          import json
+          import os
+
+          groups = json.loads(os.environ["FOUNDRY_GROUPS_JSON"])
+          closed_prs = {
+              token.strip()
+              for token in os.environ.get("CLOSED_PRS", "").split(",")
+              if token.strip()
+          }
+          now = datetime.fromisoformat(os.environ["NOW"].replace("Z", "+00:00"))
+
+          def parse_expiry(value: str) -> datetime | None:
+              try:
+                  parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+              except (AttributeError, ValueError):
+                  return None
+              if parsed.tzinfo is None:
+                  return None
+              return parsed.astimezone(timezone.utc)
+
+          findings = []
+          for group in groups:
+              tags = group.get("tags")
+              if not isinstance(tags, dict):
+                  continue
+              name = group.get("name") or "(unnamed)"
+              pr_number = tags.get("pr-number", "(missing)")
+              expires_at = tags.get("expires-at", "")
+              expiry = parse_expiry(expires_at)
+              reason = None
+              if pr_number in closed_prs:
+                  reason = "closed_pr"
+              elif expiry is None:
+                  reason = "malformed_expiry"
+              elif expiry <= now:
+                  reason = "expired"
+              if reason:
+                  findings.append((name, pr_number, expires_at or "(missing)", reason))
+
+          if not findings:
+              print("No Foundry exception resource groups need operator cleanup.")
+              raise SystemExit(0)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Foundry exception cleanup review\n\n")
+              summary.write(
+                  "These `pr-foundry` groups are not auto-deleted by the TTL janitor. "
+                  "Close-time teardown should delete them; investigate and delete manually if still present.\n\n"
+              )
+              summary.write("| Resource group | PR | Expires at | Reason |\n")
+              summary.write("| --- | --- | --- | --- |\n")
+              for name, pr_number, expires_at, reason in findings:
+                  print(
+                      f"::warning::Foundry exception resource group needs cleanup review: "
+                      f"name={name} pr={pr_number} reason={reason} expires_at={expires_at}"
+                  )
+                  summary.write(f"| `{name}` | `{pr_number}` | `{expires_at}` | `{reason}` |\n")
+          PY
 
       - name: Delete reaped groups (only what the reaper named)
         env:

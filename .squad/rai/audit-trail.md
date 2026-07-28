@@ -85,6 +85,67 @@ Proven empirically, three independent barriers stop a shared/dev/prod resource f
 **Remediation status:** none required to ship (no RED). Advisories 2/4 recommend follow-ups; Advisory 3 is defense-in-depth only.
 **Validation performed:** read reaper + all four RG-tag consumers; confirmed RG-vs-child scope split empirically; confirmed `environment-type` absent from child subset; confirmed `env:`-mapped author handling; confirmed `targetScope='resourceGroup'`. Did NOT re-run `az bicep build` or the compiled-ARM base-tag check (author pre-verified; accepted).
 
+---
+
+## 2026-07-28 — Phase 6 (#17) Foundry exception gate + live validation hook — VERDICT: 🔴 RED
+
+**Scope reviewed:** `.github/workflows/pr-environment.yml`, `.github/workflows/pr-environment-teardown.yml`, `.github/workflows/pr-environment-janitor.yml`, `infra/scripts/pr_foundry_scope.py`, `tests/test_pr_foundry_scope.py`, Foundry-related docs/runbook.
+
+### Blocking finding — approval gate can be bypassed by PR-controlled deploy code
+- **Category:** privileged workflow / cost-bearing AI resource gate integrity.
+- **Severity:** 🔴 Red.
+- **Evidence:** The deploy job checks out and provisions the PR tree (`pr-environment.yml:189`, `:357-358`). The detector returns `requires_foundry=false` for `infra/main.bicep`, `infra/main.bicepparam`, and `.github/workflows/pr-environment.yml` with no labels; local probe output had empty `requires_foundry.paths` and `requires_foundry=false`. Those files are load-bearing for whether Foundry is provisioned or whether the gate is enforced. `infra/main.bicep:149-170` always invokes `foundry.bicep`; a PR can alter root wiring/params to create or change Foundry resources while the workflow still exports `DEPLOY_FOUNDRY=false`. GitHub docs confirm `pull_request` runs in the merge-commit context, unlike `pull_request_target` which runs from the default branch; therefore same-PR workflow changes are in the execution context unless separately protected. Local repo inspection found no `.github/CODEOWNERS`; `gh api repos/bmoussaud/squad-workshop/branches/main/protection` returned HTTP 404 (branch not protected).
+- **Impact:** Human approval of `azure-foundry-provisioning` is not the only path to cost-bearing/scarce Foundry changes. A same-repo PR can modify deploy-control or Bicep root surfaces so the automatic `azure-pr-app` path provisions or changes Foundry without the Foundry environment approval.
+- **Fix owner:** Tank owns the workflow/docs architecture; Trinity should revise `infra/scripts/pr_foundry_scope.py` and tests if the detector remains part of the design.
+- **Required fix direction:** Do not let PR-modified deploy-control code decide whether to use privileged Azure OIDC. Either run privileged deploy logic from a trusted default-branch workflow/ref before checking out PR code, or fail/require the Foundry approval for all load-bearing control surfaces (`.github/workflows/pr-environment*.yml`, `infra/scripts/pr_*`, `infra/main.bicep`, `infra/main.bicepparam`, `infra/foundry.bicep`, shared Foundry RBAC modules, and any other transitive Foundry provisioning surface). The control must itself be evaluated from trusted code, not from the PR's mutable copy.
+
+### Sanitized live validation hook — 🟢 clean on covered paths
+- **Evidence:** Replayed the hook with mocked HTTP 500, URLError, non-JSON body, JSON failure document, and success. Injected sentinel strings representing prompt/body/endpoint/signed URL/credential into exception reasons and response bodies. Logs, `$GITHUB_OUTPUT`, and `$GITHUB_STEP_SUMMARY` contained only pass/fail plus `live-foundry-<run>-<attempt>` correlation ID; no sentinel leaked. PR comment code consumes only `LIVE_VALIDATION_STATUS` and `LIVE_VALIDATION_CORRELATION_ID` (`pr-environment.yml:601-606`).
+- **Residual advisory:** Add a top-level `except Exception` sanitizer around the inline Python for defense-in-depth against future unexpected exceptions; current covered provider/app failure modes are clean.
+
+### Gate expression and preflight coercion — 🟢 clean within the current trusted workflow
+- **Evidence:** `foundry_exception` writes `authorized=true` only after the environment job starts (`pr-environment.yml:147-163`). Deploy requires `needs.foundry_exception.result == 'success'` for the Foundry exception branch (`:171`). Second preflight receives a normalized expression that maps non-`true` outputs to `false` (`:311-338`). Local preflight probes: empty/false/FALSE/1/yes authorization all blocked with `foundry_unauthorized`; only exact `true` proceeded, and `true` with one active Foundry env blocked with `foundry_concurrency_cap`.
+- **Boundary:** This proof assumes the workflow/control files are trusted; the blocking finding above breaks that assumption for PR-mutated control surfaces.
+
+### Detector as a security control — 🔴 insufficient coverage
+- **Evidence:** Detector inputs come from GitHub API changed paths + PR labels, not checked-in files, which is good. But the allowlist is too narrow: path-only matches only `infra/foundry.bicep` and `infra/modules/shared-foundry-rbac.bicep`. It intentionally excludes `infra/main.bicep`/`.bicepparam` and ignores workflow/control scripts. Local probe with those paths returned `requires_foundry=false`.
+- **Impact:** False negatives matter because PR-controlled Bicep/workflow code is executed during deploy. The statement "false negative only uses shared Foundry" is true only if those load-bearing files remain trusted and unchanged.
+
+### Destructive teardown / janitor — 🟢 acceptable residual risk
+- **Evidence:** Teardown now validates PR number, distinguishes `az group list` failure from empty result, filters exact `environment-type in {'pr-app','pr-foundry'}` in Python, and fails on parse/delete errors rather than deleting by exclusion (`pr-environment-teardown.yml:116-177`). Janitor auto-deletes only `pr-app`; `pr-foundry` is surfaced in warnings/summary for operator cleanup (`pr-environment-janitor.yml:119-189`) and not TTL-deleted. Failure modes reviewed here fail toward no delete or visible failure, not broader deletion.
+
+### Human factors — 🟡 advisory
+- **Assessment:** A sole `bmoussaud` reviewer with `prevent_self_review=false` is an audit/friction checkpoint and explicit cost acknowledgement, not independent security review. It is not pure theatre if the goal is "pause and consciously approve scarce spend," but it should not be described as a two-person or independent safety control.
+
+**Validation performed:** targeted unit discovery passed (`test_pr_foundry_scope.py`: 20 tests; `test_pr_preflight_cli.py`: 18 tests). `uv` was unavailable, so validation used system Python `unittest`. Empirical probes covered live-hook leakage, Foundry authorization coercion, detector false-negative control paths, repo protection/CODEOWNERS absence, and teardown failure direction by reading workflow control flow.
+
+**Remediation status:** open; Phase 6 must not ship until the trusted-control-surface bypass is fixed and re-reviewed.
+
+---
+
+## 2026-07-28 — Phase 6 (#17) Foundry gate re-review after Tank/Trinity fix — VERDICT: 🔴 RED sustained
+
+**Scope reviewed:** `.github/workflows/pr-environment.yml`, `infra/main.bicepparam`, `infra/main.bicep`, `infra/foundry.bicep`, `infra/scripts/pr_foundry_scope.py`, and Foundry gate docs.
+
+### What is fixed
+- **Fail-open default fixed:** `infra/main.bicepparam:14`, `infra/main.bicep:12-13`, and `infra/foundry.bicep:5-6` now default Foundry provisioning to `false`.
+- **Approval now drives provisioning:** workflow exports `DEPLOY_FOUNDRY=${FOUNDRY_AUTHORIZED}` (`pr-environment.yml:255-264`), so detection requests review but does not directly provision Foundry.
+- **Integrity assertion exists before provision:** `pr-environment.yml:348-395` checks `main.bicepparam` and root module wiring before `azd provision` (`:407`).
+- **Detector is better for accidental switch regressions:** `pr_foundry_scope.py` inspects `main.bicep`/`main.bicepparam` switch wiring when those files change and exits 3 on unreadable/malformed inspection.
+
+### Blocking finding — fork/non-collaborator can still steer trusted preflight outputs through PR-controlled code
+- **Category:** privileged workflow trust boundary / Azure OIDC exposure.
+- **Severity:** 🔴 Red.
+- **Mechanism:** The workflow's privileged deploy decision still depends on outputs produced by scripts from the PR checkout. `preflight` checks out the PR merge content with no `ref:` (`pr-environment.yml:60`) and then executes `infra/scripts/pr_foundry_scope.py` and `infra/scripts/pr_preflight.py` from that checkout (`:91-94`, `:117-130`). The `deploy` job's only fork/trust gate is `needs.preflight.outputs...` (`:171`); it has no independent `github.event.pull_request.head.repo.fork == false` condition before the Azure environment/OIDC job starts. Therefore a fork PR can modify `pr_foundry_scope.py`/`pr_preflight.py` to emit `decision=proceed`, `requires_foundry=false`, and `reason_code=ok`, causing the Azure deploy job to start. This is a non-collaborator path to the credential-bearing job, not merely collaborator-level residual risk.
+- **Why this sustains RED:** The new detector/assertion improves accidental same-repo safety, but both controls are still PR-content controls. The assertion runs only inside the deploy job after Azure auth and is itself inline workflow content; it does not provide a trusted pre-Azure boundary if the decision to enter the job came from PR-controlled scripts.
+- **Required fix direction:** Before any job with `environment: azure-pr-app` and `id-token: write` can start, add a trusted, non-PR-controlled fork/same-repo gate. Cheapest acceptable options: (1) add a deploy job-level condition using GitHub event context directly, e.g. require `github.event.pull_request.head.repo.fork == false`, `head.repo.full_name == github.repository`, and `draft == false` in the YAML that exists on the trusted base workflow; and run preflight/detector from base-ref content, not the PR checkout; or (2) split privileged deployment into a base-ref trusted workflow (`workflow_run`/`pull_request_target` style without checking out untrusted code until after fork rejection). Pinning only the detector/assertion to base-ref is useful but insufficient unless the fork gate feeding the deploy job is also trusted.
+
+### Answers to requested open questions
+1. **Residual risk is not yet reduced to collaborator-level.** A non-collaborator fork can alter the PR-checked-out preflight scripts that produce the deploy job's gating outputs. If GitHub/Azure OIDC later denies that token for forks, the run would fail safe, but this repository should not rely on that external failure mode when the workflow can cheaply refuse the deploy job before requesting OIDC.
+2. **The fix meaningfully protects accidental same-repo/model-spend regressions.** The `DEPLOY_FOUNDRY=false` default, approval-derived `DEPLOY_FOUNDRY`, and switch assertion make routine PRs/agents much less likely to accidentally create Foundry capacity. This would be Yellow/accepted risk for collaborator-only threat model; the fork path keeps it Red.
+3. **Cheap structural hardening worth doing now:** add an independent job-level fork/same-repo/draft condition on `deploy` and use base-ref/trusted copies of the preflight/detector/assertion logic for the gate. This is small compared with a full two-workflow redesign and directly closes the non-collaborator path.
+
+**Remediation status:** open; RED sustained until the pre-Azure fork/same-repo gate is trusted independently of PR-controlled scripts.
 ### 2026-07-28T10:05:06+02:00: gpt-image-2 Foundry deployment approval assessment (#2)
 - **Scope:** `src/fantasy_cards/adapters.py`, `src/fantasy_cards/web.py`, `src/fantasy_cards/config.py`, `src/fantasy_cards/telemetry.py`, `infra/main.bicep`, `infra/foundry.bicep`, `infra/web.bicep`, `infra/main.bicepparam`.
 - **Verdict:** 🟡 Yellow — acceptable for retroactive dev approval with explicit conditions; not sufficient as-is for production approval.

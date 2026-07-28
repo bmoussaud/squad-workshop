@@ -98,13 +98,14 @@ Deployment path:
 
 Teardown path:
 
-- On `closed`, run `azd down --purge` for the deterministic environment name and remove the PR comment or update it to show teardown status.
+- On `closed`, delete the PR-tagged ephemeral resource group for both `environment-type=pr-app` and the gated `environment-type=pr-foundry` exception path, then remove the PR comment or update it to show teardown status.
 - The close job must run even when provision/deploy failed partway. It should tolerate absent resources and still report completion.
 
 Janitor path:
 
-- Daily, enumerate resource groups tagged `ephemeral=true` and `expires-at < now`.
-- Tear down expired PR environments with `azd down --purge` or delete the tagged resource group if `azd` state is unavailable.
+- Daily, enumerate app-tier resource groups tagged `ephemeral=true`, `environment-type=pr-app`, and `expires-at < now`.
+- Tear down expired app-tier PR environments with `azd down --purge` or delete the tagged resource group if `azd` state is unavailable.
+- Do not infer TTL deletion for `environment-type=pr-foundry`: close-time teardown is the deterministic cap-release path for Foundry exceptions, while the janitor surfaces expired or closed-PR `pr-foundry` groups as operator cleanup warnings.
 - Report orphaned or failed deletes as workflow annotations and leave enough non-secret identifiers for Tank to investigate.
 
 Workflow concurrency:
@@ -117,7 +118,7 @@ Workflow concurrency:
 
 The current Bicep/azd contract should be parameterized rather than forked:
 
-- Add `deployFoundry` as a Bicep parameter. It defaults to `false` for PR environments and remains explicit for any environment that provisions Foundry.
+- Add `deployFoundry` as a Bicep parameter. It defaults to `false` everywhere; PR environments keep it false unless the `azure-foundry-provisioning` approval job succeeds, and any dev/main/prod path that provisions Foundry must set `DEPLOY_FOUNDRY=true` explicitly.
 - Add parameters for shared Foundry binding:
   - shared Foundry account resource ID or endpoint;
   - shared Foundry project identifier where needed by the app;
@@ -166,8 +167,8 @@ Lifecycle rules:
 
 - Open PR TTL is 7 days.
 - Each new push resets `expires-at` to seven days from the successful deploy run.
-- Closed or merged PRs are torn down immediately with `azd down --purge`.
-- The daily janitor is mandatory backup cleanup for orphaned environments, failed close workflows, and deleted branches.
+- Closed or merged PRs are torn down immediately by deleting the exact PR-tagged resource group, including gated Foundry exceptions.
+- The daily janitor is mandatory backup cleanup for orphaned app-tier environments, failed close workflows, and deleted branches. Foundry exception groups are warning-only in the janitor because TTL expiry is inferred; they are not silently auto-deleted outside the explicit PR-close event.
 
 Cost controls:
 
@@ -181,6 +182,7 @@ Cost controls:
 
 - Fork PRs receive no Azure credentials, no Azure OIDC federation, and no deploy workflow permissions. They run build/test only.
 - Same-repo PR deployment is automatic only for non-draft PRs.
+- Credential-bearing and approval-authority jobs (`azure-pr-app` deploy and `azure-foundry-provisioning`) enforce trusted GitHub event-context guards at the job level: `head.repo.fork == false`, `head.repo.full_name == github.repository`, and `draft == false`. This is in addition to script preflight because preflight/detector code is checked out from PR head in the current workflow and is not itself a security perimeter.
 - OIDC federation replaces stored Azure client secrets. GitHub workflow permissions should use `id-token: write` only on jobs that need Azure login and least `contents`/`pull-requests` permissions elsewhere.
 - PR app identities are user-assigned managed identities with least privilege:
   - `AcrPull` on the shared ACR;
@@ -198,9 +200,9 @@ Use two GitHub Environments:
 | Environment | Purpose | Review policy |
 | --- | --- | --- |
 | `azure-pr-app` | Automatic app-tier PR provision/deploy/smoke for trusted same-repo non-draft PRs | No required reviewers; uses OIDC with least-privileged app-tier deployment permissions |
-| `azure-foundry-provisioning` | Rare Foundry/model/RBAC/region/safety provisioning exceptions | Required reviewers: Benoit plus Tank or Morpheus |
+| `azure-foundry-provisioning` | Rare Foundry/model/RBAC/region/safety provisioning exceptions | Required reviewers configured in GitHub; for this repo the achievable implementation is `bmoussaud` because Tank and Morpheus are AI agents, not GitHub users |
 
-This resolves issue #2 by separating routine app-tier review deployments from cost-bearing or scarce-capacity Foundry provisioning. The default path is automatic and repeatable; the exceptional path is explicitly approved.
+This resolves issue #2 by separating routine app-tier review deployments from cost-bearing or scarce-capacity Foundry provisioning. The default path is automatic and repeatable; the exceptional path is explicitly approved. The workflow detector computes whether the PR requires the Foundry exception and pauses those PRs on `azure-foundry-provisioning`, but detection is a triage signal only: `DEPLOY_FOUNDRY=true` and `foundry_authorized=true` are derived from the environment approval job succeeding. Before `azd provision`, the workflow asserts that `infra/main.bicepparam` still sources `deployFoundry` from `DEPLOY_FOUNDRY` with fail-closed default `false`, and that `infra/main.bicep` passes that switch through to `foundry.bicep` without hardcoding it.
 
 ## Post-deploy validation
 
@@ -210,13 +212,13 @@ Every successful deploy runs:
 2. `GET /health/ready` against the PR app FQDN.
 3. PR comment update with both statuses, the app URL, expiry, and workflow run link.
 
-The workflow also exposes a labelled live-Foundry validation hook for Switch/Neo. The hook is not automatic for every PR: it runs only when the agreed label is present and the PR is trusted. It should exercise a sanitized `gpt-image-2` card-generation path, capture pass/fail and correlation ID only, and avoid publishing prompts, image bytes, provider internals, or credentials. This ties issue #4 live Azure validation to the issue #11 card-layout follow-up without turning every PR deploy into a model-spend event.
+The workflow also exposes a labelled live-Foundry validation hook for Switch/Neo. The hook is not automatic for every PR: it runs only when the `validate:live-foundry` label is present and the PR is trusted. It exercises a sanitized `gpt-image-2` card-generation path, captures pass/fail and correlation ID only, and avoids publishing prompts, image bytes, provider internals, endpoints containing tenant details, or credentials. This ties issue #4 live Azure validation to the issue #11 card-layout follow-up without turning every PR deploy into a model-spend event.
 
 ## Pre-mortem & mitigations
 
 | Failure mode | Mitigation |
 | --- | --- |
-| PR environments leak after close or failed workflow | Immediate close-time `azd down --purge`, daily TTL janitor, `ephemeral=true` and `expires-at` tags |
+| PR environments leak after close or failed workflow | Immediate close-time deletion of the exact PR-tagged `pr-app`/`pr-foundry` resource group, daily TTL janitor for `pr-app`, warning-only janitor surfacing for `pr-foundry`, `ephemeral=true` and `expires-at` tags |
 | Azure name exceeds service limits | Deterministic compaction rules, preflight name validation, explicit Container App ≤32 and Storage ≤24 checks |
 | Same-repo PR deploys too many environments | Hard app-tier cap of three, PR-number workflow concurrency, cancel obsolete runs |
 | Foundry quota exhausted | Shared Foundry default, no Foundry-per-PR unless gated, one cost-bearing Foundry exception at a time |
@@ -235,7 +237,7 @@ MVP:
 - Fork PR build/test-only enforcement.
 - Deterministic `azd` environment naming and compact Azure resource names.
 - Shared ACR and shared Foundry binding.
-- `deployFoundry=false` default for PR app environments.
+- `deployFoundry=false` fail-closed Bicep default; PR app environments bind to shared Foundry unless the Foundry approval job explicitly authorizes per-PR provisioning.
 - OIDC login through `azure-pr-app`.
 - `azd provision` then `azd deploy`.
 - `/health/live` and `/health/ready` smoke tests.
@@ -262,10 +264,10 @@ Resolved:
 2. **Should a label be required to deploy a PR environment?** RESOLVED: no. Every trusted same-repo, non-draft PR deploys automatically on open/reopen/synchronize.
 3. **What is the lifecycle?** RESOLVED: open PR environments live for 7 days, reset on push, and tear down immediately on close.
 4. **Should each PR get its own ACR?** RESOLVED: no. One shared ACR serves all PR environments.
+5. **What exact label name should trigger the live-Foundry validation hook for Switch/Neo?** RESOLVED: `validate:live-foundry`.
 
 Still open:
 
-- What exact label name should trigger the live-Foundry validation hook for Switch/Neo?
 - Who receives budget action-group emails in addition to Benoit and Tank?
 - Should failed smoke tests block PR merge through a required status check, or remain advisory during MVP?
 - What is the approved wording and retention policy for PR comments after teardown?
@@ -312,7 +314,7 @@ Phase 5: cost and observability
 
 Phase 6: Foundry exception and live validation hook
 
-- Add `azure-foundry-provisioning` environment with required reviewers Benoit plus Tank or Morpheus.
-- Add a gated path for the rare Foundry-per-PR exception with quota and cost preflight.
-- Add the labelled live-Foundry validation hook for Switch/Neo using sanitized evidence only.
+- Add `azure-foundry-provisioning` environment with required GitHub reviewers; current repo configuration uses `bmoussaud` as the sole required reviewer because Tank and Morpheus are not GitHub users.
+- Add a gated path for the rare Foundry-per-PR exception with quota and cost preflight; normal app-tier PRs never wait on the Foundry gate.
+- Add the `validate:live-foundry` labelled live-Foundry validation hook for Switch/Neo using sanitized evidence only.
 - Map to issues: Foundry exception gate, issue #4 live Azure validation, issue #11 card-layout follow-up.
