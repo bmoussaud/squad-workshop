@@ -57,6 +57,16 @@ var privateEndpointSubnetName = 'snet-private-endpoints'
 var privateEndpointName = 'pe-${storageAccountNameEffective}-blob'
 var privateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var resolvedSharedContainerRegistryResourceGroupName = empty(sharedContainerRegistryResourceGroupName) ? resourceGroup().name : sharedContainerRegistryResourceGroupName
+var containerAppsWorkloadProfileName = workloadProfileType == 'Consumption' ? 'Consumption' : 'dedicated'
+var containerAppsWorkloadProfile = workloadProfileType == 'Consumption' ? {
+	name: containerAppsWorkloadProfileName
+	workloadProfileType: workloadProfileType
+} : {
+	name: containerAppsWorkloadProfileName
+	workloadProfileType: workloadProfileType
+	minimumCount: workloadProfileMinimumCount
+	maximumCount: workloadProfileMaximumCount
+}
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
 	name: last(split(applicationInsightsResourceId, '/'))
@@ -282,12 +292,7 @@ resource privateContainerAppsEnvironment 'Microsoft.App/managedEnvironments@2024
 			internal: false
 		}
 		workloadProfiles: [
-			{
-				name: 'dedicated'
-				workloadProfileType: workloadProfileType
-				minimumCount: workloadProfileMinimumCount
-				maximumCount: workloadProfileMaximumCount
-			}
+			containerAppsWorkloadProfile
 		]
 		zoneRedundant: false
 	}
@@ -304,12 +309,7 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-10-02-
 		}
 		publicNetworkAccess: 'Enabled'
 		workloadProfiles: [
-			{
-				name: 'dedicated'
-				workloadProfileType: workloadProfileType
-				minimumCount: workloadProfileMinimumCount
-				maximumCount: workloadProfileMaximumCount
-			}
+			containerAppsWorkloadProfile
 		]
 		zoneRedundant: false
 	}
@@ -327,7 +327,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 			]
 		}
 		environmentResourceId: containerAppsEnvironment.id
-		workloadProfileName: 'dedicated'
+		workloadProfileName: containerAppsWorkloadProfileName
 		activeRevisionsMode: 'Single'
 		ingressAllowInsecure: false
 		ingressExternal: true
@@ -459,7 +459,7 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 			]
 		}
 		environmentResourceId: privateContainerAppsEnvironment.id
-		workloadProfileName: 'dedicated'
+		workloadProfileName: containerAppsWorkloadProfileName
 		activeRevisionsMode: 'Single'
 		ingressAllowInsecure: false
 		ingressExternal: true

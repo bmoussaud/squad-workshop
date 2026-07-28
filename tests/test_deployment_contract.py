@@ -463,10 +463,22 @@ class DeploymentContractTests(unittest.TestCase):
             dependency_text(blob_data_assignment),
         )
 
+
+    def test_container_apps_workload_profile_preserves_pr_consumption_scale_to_zero(self) -> None:
+        self.assertIn(
+            "var containerAppsWorkloadProfileName = workloadProfileType == 'Consumption' ? 'Consumption' : 'dedicated'",
+            self.web_bicep,
+        )
+        self.assertRegex(
+            self.web_bicep,
+            r"(?s)var containerAppsWorkloadProfile = workloadProfileType == 'Consumption' \? \{.*?name: containerAppsWorkloadProfileName.*?workloadProfileType: workloadProfileType.*?\} : \{.*?minimumCount: workloadProfileMinimumCount.*?maximumCount: workloadProfileMaximumCount.*?\}",
+        )
+        self.assertIn("workloadProfileName: containerAppsWorkloadProfileName", self.web_bicep)
+
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")
         for contract in (
-            "workloadProfileName: 'dedicated'",
+            "workloadProfileName: containerAppsWorkloadProfileName",
             "ingressAllowInsecure: false",
             "ingressExternal: true",
             "ingressTargetPort: 8000",

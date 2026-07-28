@@ -64,15 +64,15 @@ param modelSkuName string
 @description('Deployment capacity. Revalidate quota and live capacity immediately before provisioning.')
 param modelCapacity int = 1
 
-@description('Azure Container Apps dedicated workload profile type validated for the target region and subscription.')
+@description('Azure Container Apps workload profile type. Use Consumption for scale-to-zero PR environments; dedicated SKUs require validated capacity bounds.')
 param workloadProfileType string
 
-@minValue(1)
-@description('Minimum dedicated workload profile instance count validated against availability and cost.')
+@minValue(0)
+@description('Minimum workload profile instance count. Consumption omits this value; dedicated SKUs require a value validated against availability and cost.')
 param workloadProfileMinimumCount int
 
 @minValue(1)
-@description('Maximum dedicated workload profile instance count validated against availability and cost.')
+@description('Maximum workload profile instance count. Consumption omits this value; dedicated SKUs require a value validated against availability and cost.')
 param workloadProfileMaximumCount int
 
 @description('Container App CPU allocation, validated for the selected workload profile.')
