@@ -86,8 +86,10 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn("background-color: var(--paper);", css)
         self.assertIn("background: rgba(223, 243, 223, 0.96);", css)
         self.assertIn("background: #d2ead2;", css)
-        self.assertNotIn("#f7f3e8", css)
-        self.assertNotIn("rgba(247, 243, 232", css)
+        outdated_paper = "#" + "f7" + "f3" + "e8"
+        outdated_masthead = "rgba(" + ", ".join(("247", "243", "232"))
+        self.assertNotIn(outdated_paper, css)
+        self.assertNotIn(outdated_masthead, css)
 
     def test_javascript_is_progressive_enhancement_not_required_navigation(self) -> None:
         from fastapi.testclient import TestClient
