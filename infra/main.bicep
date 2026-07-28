@@ -145,9 +145,10 @@ var tags = union(
   empty(authorTag) ? {} : { author: authorTag },
   empty(createdAtTag) ? {} : { 'created-at': createdAtTag }
 )
+var moduleDeploymentNameToken = empty(containerAppsEnvironmentName) ? environmentName : containerAppsEnvironmentName
 
 module foundry 'foundry.bicep' = {
-  name: 'foundry-${environmentName}'
+  name: 'foundry-${moduleDeploymentNameToken}'
   params: {
     location: location
     tags: tags
@@ -170,7 +171,7 @@ module foundry 'foundry.bicep' = {
 }
 
 module web 'web.bicep' = {
-  name: 'web-${environmentName}'
+  name: 'web-${moduleDeploymentNameToken}'
   params: {
     location: applicationLocation
     tags: tags

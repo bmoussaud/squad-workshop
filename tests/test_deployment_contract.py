@@ -242,6 +242,12 @@ class DeploymentContractTests(unittest.TestCase):
         )
 
     def test_main_bicep_preserves_module_boundary_and_required_outputs(self) -> None:
+        self.assertIn(
+            "var moduleDeploymentNameToken = empty(containerAppsEnvironmentName) ? environmentName : containerAppsEnvironmentName",
+            self.main_bicep,
+        )
+        self.assertIn("name: 'foundry-${moduleDeploymentNameToken}'", self.main_bicep)
+        self.assertIn("name: 'web-${moduleDeploymentNameToken}'", self.main_bicep)
         web_module = extract_bicep_block(self.main_bicep, "module", "web")
         self.assertIn("'web.bicep'", self.main_bicep)
         for explicit_input in (
