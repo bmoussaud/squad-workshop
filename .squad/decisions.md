@@ -388,3 +388,19 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **By:** Switch
 **What:** The CI ownership gate recognizes unique closing references only in genuine top-level Markdown prose. Code spans, fenced and indented code blocks, blockquotes, and Markdown tables are documentation or quotation and do not close issues. The gate remains fail-closed: exactly one unique issue is required. The PR body remains environment-backed and is never interpolated into the workflow run script.
 **Why:** Plain-text matching counted documented syntax as issue closures and rejected valid PRs.
+
+### 2026-07-28T22:16:40+02:00: PR environment cap forensic correction and issue authority
+**By:** Tank; recorded by Scribe at Ralph's direction
+**What:** Issue #71 is the authoritative app-tier capacity-accounting defect. Issue #72 is closed as its duplicate after the coordinator independently filed the same bug while Tank was already acting on a request to file it. This was a coordinator tracking failure, not a Tank failure.
+
+The timeline separates two defects: #56 merged at 17:25:03Z and its RG tag was created at 17:26:45Z (~102 seconds later); #57 merged at 17:25:07Z and its RG tag was created at 17:29:23Z (~4 minutes later); #59 closed at 17:50:00Z and RG deletion started at 17:50:16Z but completed at 18:16:20Z (~26 minutes of occupancy after close); #58 deletion completed by 18:06Z; and #69 was not created until 18:20Z. Therefore the 18:15Z cap failure was entirely closed-PR capacity: the failed #67 run and concurrent #68 run each counted three closed PR environments.
+
+The confirmed accounting defect is #71: the cap counts closed-PR environments. Separately, close-versus-deploy timing and slow asynchronous deletion can leave an environment physically present for up to about half an hour after its PR closes. That second defect is open and unfiled; do not conflate it with #71 or treat it as resolved.
+**Why:** The timestamp evidence corrects the prior open-PR-concurrency diagnosis and preserves distinct remediation paths. The coordinator must track issued filing instructions before filing overlapping issues.
+
+### 2026-07-28T22:16:40+02:00: Decisions archive gate diagnosis corrected
+**By:** Scribe; correction acknowledged by Ralph
+**What:** The decisions archive gate executed correctly at 65,927 bytes and evaluated both age tiers, but archived nothing because every entry was newer than the 30-day and 7-day cutoffs. During the run the file grew to 66,523 bytes. This is policy behavior, not an implementation failure.
+
+The #47 design under review uses a 50 KiB cap, a 45 KiB compact target, and `archive_blocked_live` as an explicit escalation state. It must never evict a live decision block to meet the cap. Preserve live operational decisions, including the `pull_request_target` reversal question, branch-naming compatibility parser, janitor untagged-orphan safety rules, and AI-notice accuracy findings.
+**Why:** A size-triggered, age-filtered archive policy cannot reduce a burst of recent activity, exactly when compaction is needed. Explicit escalation preserves auditable live decisions instead of silently deleting them.

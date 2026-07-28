@@ -1,0 +1,6 @@
+# Cap forensics and archive policy correction
+
+- **Issue authority:** #71 is authoritative. #72 was closed as a duplicate after Ralph independently filed the same app-tier cap bug that Tank had already been instructed to file. This is a coordinator tracking failure, not a Tank failure.
+- **Timeline:** #56 merged 17:25:03Z; its RG tag appeared 17:26:45Z. #57 merged 17:25:07Z; its tag appeared 17:29:23Z. #59 closed 17:50:00Z; deletion began 17:50:16Z and completed 18:16:20Z. #58 deletion completed by 18:06Z; #69 was created only at 18:20Z.
+- **Finding:** The 18:15Z cap failure was entirely closed-PR capacity. #71 is the accounting defect: closed-PR environments count toward the cap. A separate, unfiled observation remains: close/deploy timing and asynchronous deletion can leave an environment physically present for up to about 26 minutes after closure.
+- **Archive correction:** The 65,927-byte archive run evaluated both age thresholds and correctly removed nothing because every decision was younger than both cutoffs; the file then grew to 66,523 bytes. This is a contradictory policy outcome, not an execution defect. The proposed #47 design must retain live blocks and raise `archive_blocked_live` rather than evicting live operational decisions.
