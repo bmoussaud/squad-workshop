@@ -50,6 +50,12 @@ squad/{issue-number}-{kebab-case-slug}
 ```
 Example: `squad/42-fix-login-validation`
 
+Copilot App's `rename_branch` tool can transform that name into
+`{owner}-squad-{issue}-{slug}`. The PR-environment preflight accepts both forms,
+so use the branch produced by the tool directly. Do not rename an existing PR
+branch to repair its name: create a replacement PR only if a branch was created
+before this compatibility support shipped.
+
 ## PR Guidelines
 
 When opening a PR:
