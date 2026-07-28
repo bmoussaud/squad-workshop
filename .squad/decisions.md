@@ -332,3 +332,19 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **By:** Scribe (process learning from Tank and Fact Checker)
 **What:** For governance decisions involving compliance, data residency, safety gates, or billable/cloud approval, use independent parallel verification by at least two uncorrelated agents when the fact pattern is material and reversible cost or risk depends on it. The agents should not rely on each other's findings before reporting; Scribe/coordinator then reconciles convergent or conflicting evidence.
 **Why:** Tank and Fact Checker independently caught a factual error in an already-signed-off Foundry governance decision: `GlobalStandard` was incorrectly treated as EU-only. The independent convergence provided enough confidence to reopen, correct, and re-decide issue #2 before production notice wording or approval gates propagated the false premise.
+
+### 2026-07-28T11:41:20+02:00: Issue #41 accessible green palette revision
+**By:** Neo
+**What:** Independently revised the rejected green-background palette after Switch's accessibility rejection. The new palette uses `--paper: #e4f1df`, `--surface: #f7fcf4`, masthead `rgba(228, 241, 223, 0.96)`, result `#d8ecd2`, `--muted: #556052`, `--coral: #9e3a31`, `--gold: #7a5d16`, and shared border/line color `#697564`.
+**Why:** Baseline original contrast was ink 14.36/15.65/13.91, muted 5.13/5.59/4.97, coral 4.13/4.50/4.00, gold 2.39/2.61/2.32 across paper/surface/result. Trinity's green regressed muted on result and all coral/gold surfaces: ink 13.67/15.13/12.47, muted 4.88/5.40/4.45, coral 3.93/4.35/3.58, gold 2.28/2.52/2.08. Neo's revised green keeps the page visibly sage-green and raises revised ratios to ink 13.61/15.31/12.78, muted 5.64/6.35/5.30, coral 5.78/6.50/5.43, gold 5.27/5.93/4.95, line/borders 4.15/4.66/3.89.
+**Validation:** `python -m uv run python -m unittest discover -s tests` passed after updating the static CSS contract for the new hex values.
+
+### 2026-07-28T11:36:33+02:00: Switch rejected issue #41 green-background revision
+**By:** Switch
+**What:** Reject Trinity's commit `d9b6e49` for issue #41 because the selected green palette fails WCAG contrast review. Trinity is locked out from revising this artifact; Neo owns the next visual/palette revision independently.
+**Why:** Blocking contrast failures against the new green result/background colors include muted text `#68675f` on `#d2ead2` at 4.45:1 (<4.5), gold glyph `#c8972d` on `#d2ead2` at 2.08:1 (<3), and coral eyebrow `#c84d3f` below normal-text AA on `#dff3df`, `#f4fbf4`, and `#d2ead2`. Full suite rerun passed: 278 tests OK.
+
+### 2026-07-28: Green background palette for issue #41
+**By:** Trinity
+**What:** Use `--paper: #dff3df` for the page background, `--surface: #f4fbf4` for the workspace, `rgba(223, 243, 223, 0.96)` for the masthead, and `#d2ead2` for the result pane.
+**Why:** Product only specified the page green; these dependent values replace paper-matched warm neutrals with a coherent light green family while preserving readable contrast with existing text colors.

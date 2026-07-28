@@ -36,3 +36,5 @@
 - Established original baseline contrast before changing taste: original coral and gold already failed on some/all surfaces, while Trinity's green introduced additional regressions for muted/result, coral, and gold.
 - Revised only palette/color values: sage-green backgrounds plus darker muted/coral/gold and shared line/border color so normal text clears 4.5:1 and icon/UI colors clear 3:1 across paper, surface, and result.
 - Updated the static CSS contract to the new palette and validated with the full unittest suite.
+
+📌 Team update (2026-07-28T11:22:44+02:00): Issue #41 established that palette/background changes must be contrast-checked against every foreground token used on every affected surface before review. The original pre-green design already had coral/gold AA failures; Neo's accessible sage-green revision corrected those pre-existing failures while fixing Trinity's green regressions. — decided by Switch and Neo

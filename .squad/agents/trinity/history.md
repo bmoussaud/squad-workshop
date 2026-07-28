@@ -57,3 +57,5 @@ Read-only status audit of src/fantasy_cards, pyproject.toml, uv.lock, Dockerfile
 
 ### 2026-07-28T11:22:44+02:00: Green application background (#41)
 Updated the web stylesheet background palette only: --paper #dff3df, --surface #f4fbf4, masthead rgba(223, 243, 223, 0.96), and result #d2ead2. Added a static CSS contract test pinning the green page background and dependent green-family values. Full suite via `python -m uv run python -m unittest discover -s tests`: 278 tests OK.
+
+📌 Team update (2026-07-28T11:22:44+02:00): Issue #41 established that palette/background changes must be contrast-checked against every foreground token used on every affected surface before review. The original pre-green design already had coral/gold AA failures; Neo's accessible sage-green revision corrected those pre-existing failures while fixing Trinity's green regressions. — decided by Switch and Neo
