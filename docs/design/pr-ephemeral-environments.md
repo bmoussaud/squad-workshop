@@ -57,23 +57,23 @@ pr-{number}-{slug[:N]}-{hash8}
 
 - `number`: GitHub PR number.
 - `slug`: sanitized meaningful slug derived from the stable branch convention `squad/{issue}-{slug}`. Use lowercase letters, digits, and hyphens; collapse separators; trim leading/trailing hyphens. Truncate the displayed slug token as needed so the full `azd` environment name is ≤40 characters.
-- `hash8`: first 8 lowercase hexadecimal characters of `sha256(repo|prNumber|slug)`.
+- `hash8`: first 8 lowercase hexadecimal characters of `sha256(repo|prNumber|slug)`, where `repo` is the canonical GitHub `owner/repo` value (for example, `bmoussaud/squad-workshop`).
 
 Worked example for PR #14 from branch `squad/14-render-card-layout`:
 
 | Purpose | Name | Rule |
 | --- | --- | --- |
-| `azd` environment | `pr-14-render-card-layout-4717e5bb` | Human-readable and stable across pushes |
-| Storage account | `stfcpr144717e5bb` | `st` + compact app prefix `fc` + `pr14` + hash; lowercase alphanumeric only; ≤24 chars |
-| Container App | `ca-fc-pr14-rcl-4717e5bb` | `ca-fc-` + compact PR token + acronymized slug + hash; ≤32 chars |
+| `azd` environment | `pr-14-render-card-layout-4c32c628` | Human-readable and stable across pushes |
+| Storage account | `stfcpr144c32c628` | `st` + compact app prefix `fc` + `pr14` + hash; lowercase alphanumeric only; ≤24 chars |
+| Container App | `ca-fc-pr14-rcl-4c32c628` | `ca-fc-` + compact PR token + acronymized slug + hash; ≤32 chars |
 
 Per-resource compaction rules:
 
 - Storage accounts: lowercase letters and digits only, length 3-24. Do not include hyphens. Use `stfcpr{number}{hash8}` and truncate only the numeric PR token if Azure ever rejects length, preserving `hash8`.
 - Azure Container Registry names: alphanumeric only, length 5-50. PR environments do not create registries; they reference the shared ACR.
-- Container Apps: length ≤32. Use `ca-fc-pr{number}-{slugCompact}-{hash8}` where `slugCompact` is built from the first character of each slug word, then extended from left to right only while the full name remains ≤32.
-- Resource groups, managed environments, identities, Application Insights, action groups, and budgets should use the bounded `azd` environment name where service limits allow; otherwise use the same `pr{number}` + `hash8` compaction.
-- The existing `ca-fantasy-cards-${env}` pattern cannot be reused as-is for PR environments. For `pr-14-render-card-layout-4717e5bb`, it would exceed the 32-character Container App limit before adding any private-app suffix.
+- Container Apps: length 2-32; lowercase alphanumeric characters and hyphens only; start with a letter and end with an alphanumeric character. Use `ca-fc-pr{number}-{slugCompact}-{hash8}` where `slugCompact` is built from the first character of each slug word, then extended from left to right only while the full name remains ≤32.
+- Resource groups, managed environments, identities, Application Insights, action groups, and budgets should use the bounded `azd` environment name where service limits allow; otherwise use the same `pr{number}` + `hash8` compaction. `azd` publishes no documented environment-name length or character limit, so the project's 40-character cap is a conservative limit derived from the ARM nested-deployment name budget. Azure publishes a character pattern, but no maximum length, for Container Apps managed environments; the implementation therefore applies a defensive 32-character cap rather than asserting an undocumented Azure limit.
+- The existing `ca-fantasy-cards-${env}` pattern cannot be reused as-is for PR environments. For `pr-14-render-card-layout-4c32c628`, it would exceed the 32-character Container App limit before adding any private-app suffix.
 
 ## GitHub Actions workflow design
 

@@ -15,6 +15,7 @@ Key retained history:
 - 2026-07-27 #16/#25: Delivered deterministic PR-environment naming/preflight and relaxed the CI branch-name gate to advisory while keeping exact issue closure hard-fail.
 - 2026-07-27 #15/#20/#29: Parameterized PR Bicep names/env-var emission, added close-time teardown and daily janitor workflows, and configured secretless Azure OIDC for PR environments. Teardown/janitor deletion is tag-scoped and must fail loudly on Azure query errors.
 - 2026-07-28 #18/#17/#39/#41: Verified budget alerts and child tags, participated in Foundry exception gating/live validation, confirmed `GlobalStandard` is not EU-bound for inference, and supported the accessible green-background PR.
+- 2026-07-28 #23: Corrected the PR #14 per-PR environment worked example to the implementation-derived `hash8` value `4c32c628`. The canonical SHA-256 input is `bmoussaud/squad-workshop|14|render-card-layout`; keep `repo` explicitly documented as GitHub `owner/repo` and label `azd` and managed-environment length caps as conservative project constraints where their platforms publish no maximum.
 
 ## Recent Updates
 
