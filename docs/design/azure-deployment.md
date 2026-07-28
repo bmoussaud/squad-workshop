@@ -7,7 +7,7 @@ Status: implemented locally; awaiting Azure Validate and separate deployment app
 The approved web-hosting slice is represented by `azure.yaml`, `infra/main.bicep`, `infra/web.bicep`, `infra/main.bicepparam`, and the repository-root `Dockerfile`.
 
 - The azd service name is `web`, with repository-root project/build context and Azure Container Apps hosting.
-- The Container Apps environment contains only a dedicated workload profile named `dedicated`; its exact type and instance bounds remain required validation inputs and cannot fall back to Consumption.
+- The Container Apps environment supports the selected workload profile type. Production/dev deployments use a validated dedicated profile named `dedicated` with explicit instance bounds; ephemeral PR environments use the built-in `Consumption` profile so the environment can scale to zero without dedicated worker nodes.
 - The Container App exposes HTTPS ingress on port 8000, runs one Uvicorn worker with total HTTP concurrency limited to 16, keeps one to two replicas, scales at one concurrent HTTP request per replica, and probes `/health/live` and `/health/ready`.
 - The existing application user-assigned identity is attached to the app and receives deterministic `AcrPull` at registry scope, `Storage Blob Data Contributor` at the private artifact-container scope, and `Monitoring Metrics Publisher` at the Application Insights component scope. Explicit ARM dependencies make the registry assignment wait for the registry AVM deployment and the container assignment wait for the Storage AVM deployment, which creates `artifacts`. Registry admin credentials, Storage shared keys, anonymous image pull, anonymous Blob access, storage connection strings, and SAS tokens are disabled or absent.
 - `infra/scripts/retire_legacy_storage_blob_role.py` is an explicitly invoked **after-deployment maintenance** action, not an `azd` hook. Bicep/ARM incremental deployments do not delete an omitted resource, and the old Storage AVM assignment has a different account-scope GUID from the new container-scope assignment. The private Blob route is delivered by the Bicep container-scope assignment; deployment is never blocked if an operator cannot enumerate or delete the legacy account-scope assignment.
@@ -33,8 +33,8 @@ The Bicep parameter file intentionally reads unresolved deployment facts from en
 
 | Variable | Validation purpose |
 | --- | --- |
-| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_TYPE` | Exact France Central dedicated profile type/SKU |
-| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MIN_COUNT` / `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MAX_COUNT` | Approved profile capacity bounds |
+| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_TYPE` | Exact profile type/SKU: validated dedicated SKU for long-lived environments, or `Consumption` for ephemeral PR environments |
+| `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MIN_COUNT` / `AZURE_CONTAINER_APPS_WORKLOAD_PROFILE_MAX_COUNT` | Approved profile capacity bounds; omitted from the managed-environment profile when type is `Consumption` |
 | `AZURE_CONTAINER_APP_CPU` / `AZURE_CONTAINER_APP_MEMORY` | App allocation compatible with the selected profile |
 | `AZURE_MONTHLY_BUDGET_AMOUNT` | Approved monthly amount in billing currency |
 | `AZURE_BUDGET_START_DATE` | Deterministic ISO 8601 budget start aligned to the first day of a month |

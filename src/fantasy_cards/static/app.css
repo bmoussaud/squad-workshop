@@ -1,13 +1,13 @@
 :root {
   --ink: #17251d;
-  --paper: #f7f3e8;
-  --surface: #fffdf7;
+  --paper: #e4f1df;
+  --surface: #f7fcf4;
   --forest: #24513a;
   --forest-deep: #173a29;
-  --coral: #c84d3f;
-  --gold: #c8972d;
-  --line: #cec6b2;
-  --muted: #68675f;
+  --coral: #9e3a31;
+  --gold: #7a5d16;
+  --line: #697564;
+  --muted: #556052;
   --focus: #0b6c88;
   --shadow: 0 18px 50px rgba(33, 40, 34, 0.12);
   font-family: "Trebuchet MS", "Gill Sans", sans-serif;
@@ -34,7 +34,7 @@ body {
   min-height: 72px;
   padding: 12px clamp(20px, 5vw, 72px);
   border-bottom: 1px solid var(--line);
-  background: rgba(247, 243, 232, 0.96);
+  background: rgba(228, 241, 223, 0.96);
 }
 
 .wordmark {
@@ -85,7 +85,7 @@ body {
 .result {
   display: flex;
   flex-direction: column;
-  background: #edf1e8;
+  background: #d8ecd2;
 }
 
 .section-heading,
@@ -145,7 +145,7 @@ label {
 input,
 textarea {
   width: 100%;
-  border: 1px solid #a8a38f;
+  border: 1px solid #697564;
   border-radius: 4px;
   padding: 14px 15px;
   color: var(--ink);
@@ -275,7 +275,7 @@ a:focus-visible {
   min-height: 320px;
   place-content: center;
   justify-items: center;
-  border: 1px dashed #9aa994;
+  border: 1px dashed #697564;
   color: var(--muted);
   text-align: center;
 }

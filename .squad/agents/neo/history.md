@@ -30,3 +30,15 @@
 📌 Team update (2026-07-28T10:05:06+02:00): Benoit Moussaud (Product Owner) approved the Foundry stack for development only. Neo must carry forward #37: production requires a user-facing notice before release. Production also remains gated on #36 retention/deletion policy, #38 likeness/IP/minors policy, and #39 revalidate GlobalStandard routing; #39 may invalidate the EU-only assumption behind the approval.
 
 📌 Team update (2026-07-28T10:14:07+02:00): Issue #37 scope changed. The user-facing notice must state that inference processing may occur outside the EU under GlobalStandard; any EU-only wording is factually wrong. Artifacts/storage remain in France Central/customer-designated storage. — decided by Benoit Moussaud
+
+### 2026-07-28T11:41:20+02:00 — Issue #41 accessible green palette revision
+- Owned Switch's rejected palette revision independently under reviewer lockout; Trinity did not participate.
+- Established original baseline contrast before changing taste: original coral and gold already failed on some/all surfaces, while Trinity's green introduced additional regressions for muted/result, coral, and gold.
+- Revised only palette/color values: sage-green backgrounds plus darker muted/coral/gold and shared line/border color so normal text clears 4.5:1 and icon/UI colors clear 3:1 across paper, surface, and result.
+- Updated the static CSS contract to the new palette and validated with the full unittest suite.
+
+📌 Team update (2026-07-28T11:22:44+02:00): Issue #41 established that palette/background changes must be contrast-checked against every foreground token used on every affected surface before review. The original pre-green design already had coral/gold AA failures; Neo's accessible sage-green revision corrected those pre-existing failures while fixing Trinity's green regressions. — decided by Switch and Neo
+
+📌 Team update (2026-07-28T12:01:41+02:00): PR-environment work in this repo requires `squad/{issue}-{slug}` branches; otherwise Azure preflight hard-blocks with `invalid_names`. GitHub's branch-rename API closed PR #44 instead of retargeting it, so renamed branches may require replacement PRs. Azure OIDC uses the immutable ID-qualified subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`; Entra credentials must match exactly. — recorded by Scribe
+
+📌 Team update (2026-07-28T14:46:30+02:00): The `PR Azure Environment` pipeline is commissioned; run `30360924609` was its first green run. Branches must follow `squad/{issue}-{slug}` or preflight hard-blocks with `invalid_names`; wordy titles are safely truncated. `AZURE_ENV_NAME` is capped at 40 chars from ARM's 64-char deployment-name limit minus the current 24-char longest Bicep module prefix (`private-virtual-network-`); re-derive the budget if any longer module prefix is added, and rely on the Python CI regression test to catch violations. Bicep `existing` references create no dependency edge, so add explicit `dependsOn`. Prefer fast Python CI/static validation over discovering infra invariants through multi-minute Azure round trips. — decided by Tank, steered by Coordinator

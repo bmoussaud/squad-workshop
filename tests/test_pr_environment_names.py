@@ -8,11 +8,13 @@ domain logic), so they are loaded by path -- matching the existing
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import hashlib
+import re
 import sys
 import unittest
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "infra/scripts"
+REPOSITORY_ROOT = SCRIPTS_DIR.parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -131,6 +133,55 @@ class WorkedExampleTests(unittest.TestCase):
             self.names.virtual_network,
             f"vnet-{self.names.managed_environment}-private",
         )
+
+
+class EnvironmentNameLimitTests(unittest.TestCase):
+    def test_long_branch_slug_is_truncated_but_keeps_pr_number_and_hash(self) -> None:
+        names = naming.compute_names(
+            REPO, 45, "squad/41-change-application-background-color-to-green"
+        )
+        self.assertEqual(
+            names.environment_name,
+            f"pr-45-change-application-backgr-{names.hash8}",
+        )
+        self.assertEqual(len(names.environment_name), naming.AZD_ENVIRONMENT_MAX)
+        self.assertTrue(names.environment_name.startswith("pr-45-"))
+        self.assertTrue(names.environment_name.endswith(names.hash8))
+        self.assertEqual(
+            names.hash8,
+            naming.hash8(REPO, 45, "change-application-background-color-to-green"),
+        )
+
+    def test_every_project_module_deployment_name_fits_worst_case_environment_name(self) -> None:
+        module_name_patterns: list[tuple[str, str]] = []
+        for template in (REPOSITORY_ROOT / "infra").rglob("*.bicep"):
+            lines = template.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                if not re.match(r"\s*module\s+\w+\s+", line):
+                    continue
+                nearby = "\n".join(lines[index : index + 8])
+                match = re.search(r"name:\s*'([^']*)'", nearby)
+                if match is not None:
+                    module_name_patterns.append(
+                        (template.relative_to(REPOSITORY_ROOT).as_posix(), match.group(1))
+                    )
+
+        self.assertTrue(module_name_patterns)
+        longest = max(
+            module_name_patterns,
+            key=lambda item: len(re.sub(r"\$\{[^}]+\}", "", item[1])),
+        )
+        prefix_budget = naming.ARM_DEPLOYMENT_MAX - naming.AZD_ENVIRONMENT_MAX
+        self.assertEqual(prefix_budget, 24)
+        for path, pattern in module_name_patterns:
+            literal_prefix = re.sub(r"\$\{[^}]+\}", "", pattern)
+            worst_case_length = len(literal_prefix) + naming.AZD_ENVIRONMENT_MAX
+            self.assertLessEqual(
+                worst_case_length,
+                naming.ARM_DEPLOYMENT_MAX,
+                f"{path}: {pattern} can reach {worst_case_length} chars; "
+                f"longest observed prefix is {longest}",
+            )
 
 
 class VirtualNetworkTests(unittest.TestCase):
@@ -381,6 +432,9 @@ class PropertySweepTests(unittest.TestCase):
                 self.assertLessEqual(len(names.virtual_network), 64, names.virtual_network)
                 self.assertRegex(names.virtual_network, r"^[a-z][a-z0-9-]*[a-z0-9]$")
                 self.assertLessEqual(len(names.resource_group), 90)
+                self.assertLessEqual(
+                    len(names.environment_name), naming.AZD_ENVIRONMENT_MAX
+                )
                 self.assertTrue(names.environment_name.startswith(f"pr-{pr}-"))
                 self.assertTrue(names.environment_name.endswith(names.hash8))
 
@@ -406,9 +460,8 @@ class LogAnalyticsTests(unittest.TestCase):
     """The deterministic Log Analytics workspace name (Phase 5).
 
     Azure rule: length 4-63, alphanumerics and hyphens only, must start and end
-    with an alphanumeric character. The name mirrors the sibling 63-char names
-    (budget/action_group): the full ``pr-{n}-{slug}-{hash8}`` env name when it
-    fits, else the ``pr{n}-{hash8}`` compaction that always preserves ``hash8``.
+    with an alphanumeric character. Since AZURE_ENV_NAME is bounded to 40 chars,
+    the Log Analytics workspace can use it directly for all PR environments.
     """
 
     _NAME_RE = r"^[a-z0-9][a-z0-9-]*[a-z0-9]$"
@@ -428,25 +481,20 @@ class LogAnalyticsTests(unittest.TestCase):
         second = naming.compute_names(REPO, 14, "squad/14-render-card-layout")
         self.assertEqual(first.log_analytics, second.log_analytics)
 
-    def test_exact_63_char_env_name_used_verbatim(self) -> None:
-        # slug length 48 makes the full env name exactly 63 chars
-        # ("pr-14-" = 6, slug = 48, "-" = 1, hash8 = 8), the boundary at which
-        # the name is still used verbatim rather than compacted.
+    def test_long_raw_slug_is_truncated_before_log_analytics_receives_it(self) -> None:
         slug = "a" * 48
         names = naming.compute_names(REPO, 14, f"squad/14-{slug}")
-        self.assertEqual(len(names.environment_name), 63)
+        self.assertEqual(len(names.environment_name), naming.AZD_ENVIRONMENT_MAX)
         self.assertEqual(names.log_analytics, names.environment_name)
-        self.assertEqual(len(names.log_analytics), 63)
-        self.assertTrue(names.log_analytics.startswith(f"pr-14-{slug}-"))
+        self.assertEqual(len(names.log_analytics), naming.AZD_ENVIRONMENT_MAX)
+        self.assertTrue(names.log_analytics.startswith("pr-14-aaaaaaaaaaaaaaaaaaaaaaaaa-"))
         self.assertRegex(names.log_analytics, self._NAME_RE)
 
-    def test_64_char_env_name_compacts_to_pr_token_plus_hash(self) -> None:
-        # slug length 49 pushes the full env name to 64 chars (> 63), so the
-        # workspace name must fall back to the pr{n}-{hash8} compaction.
+    def test_pathological_slug_still_uses_bounded_environment_name(self) -> None:
         slug = "a" * 49
         names = naming.compute_names(REPO, 14, f"squad/14-{slug}")
-        self.assertEqual(len(names.environment_name), 64)
-        self.assertEqual(names.log_analytics, f"pr14-{names.hash8}")
+        self.assertEqual(len(names.environment_name), naming.AZD_ENVIRONMENT_MAX)
+        self.assertEqual(names.log_analytics, names.environment_name)
         self.assertLessEqual(len(names.log_analytics), 63)
         self.assertRegex(names.log_analytics, self._NAME_RE)
 
@@ -457,7 +505,7 @@ class LogAnalyticsTests(unittest.TestCase):
                 names = naming.compute_names(REPO, pr, f"squad/{pr}-{slug}")
                 self.assertLessEqual(len(names.log_analytics), 63, names.log_analytics)
                 self.assertGreaterEqual(len(names.log_analytics), 4, names.log_analytics)
-                self.assertEqual(names.log_analytics, f"pr{pr}-{names.hash8}")
+                self.assertEqual(names.log_analytics, names.environment_name)
                 self.assertRegex(names.log_analytics, self._NAME_RE)
 
     def test_appears_in_printable_and_envvars_output(self) -> None:

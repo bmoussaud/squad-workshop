@@ -242,6 +242,12 @@ class DeploymentContractTests(unittest.TestCase):
         )
 
     def test_main_bicep_preserves_module_boundary_and_required_outputs(self) -> None:
+        self.assertIn(
+            "var moduleDeploymentNameToken = empty(containerAppsEnvironmentName) ? environmentName : containerAppsEnvironmentName",
+            self.main_bicep,
+        )
+        self.assertIn("name: 'foundry-${moduleDeploymentNameToken}'", self.main_bicep)
+        self.assertIn("name: 'web-${moduleDeploymentNameToken}'", self.main_bicep)
         web_module = extract_bicep_block(self.main_bicep, "module", "web")
         self.assertIn("'web.bicep'", self.main_bicep)
         for explicit_input in (
@@ -305,6 +311,17 @@ class DeploymentContractTests(unittest.TestCase):
             "applicationIdentityPrincipalId", acr_role + blob_role + telemetry_role
         )
         self.assertNotRegex(self.web_bicep, r"(?i)(connectionString|accountKey|sasToken)\s*:")
+
+    def test_public_container_app_monitoring_waits_for_avm_module(self) -> None:
+        app_diagnostics = extract_bicep_block(
+            self.web_bicep, "resource", "appDiagnostics"
+        )
+        replica_alert = extract_bicep_block(
+            self.web_bicep, "resource", "replicaCeilingAlert"
+        )
+        for block in (app_diagnostics, replica_alert):
+            self.assertIn("dependsOn:", block)
+            self.assertIn("containerApp", block)
 
     def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
         migration = self.legacy_blob_role_migration
@@ -463,10 +480,22 @@ class DeploymentContractTests(unittest.TestCase):
             dependency_text(blob_data_assignment),
         )
 
+
+    def test_container_apps_workload_profile_preserves_pr_consumption_scale_to_zero(self) -> None:
+        self.assertIn(
+            "var containerAppsWorkloadProfileName = workloadProfileType == 'Consumption' ? 'Consumption' : 'dedicated'",
+            self.web_bicep,
+        )
+        self.assertRegex(
+            self.web_bicep,
+            r"(?s)var containerAppsWorkloadProfile = workloadProfileType == 'Consumption' \? \{.*?name: containerAppsWorkloadProfileName.*?workloadProfileType: workloadProfileType.*?\} : \{.*?minimumCount: workloadProfileMinimumCount.*?maximumCount: workloadProfileMaximumCount.*?\}",
+        )
+        self.assertIn("workloadProfileName: containerAppsWorkloadProfileName", self.web_bicep)
+
     def test_container_app_contract_has_ingress_probes_scaling_and_exact_environment(self) -> None:
         app = extract_bicep_block(self.web_bicep, "module", "containerApp")
         for contract in (
-            "workloadProfileName: 'dedicated'",
+            "workloadProfileName: containerAppsWorkloadProfileName",
             "ingressAllowInsecure: false",
             "ingressExternal: true",
             "ingressTargetPort: 8000",

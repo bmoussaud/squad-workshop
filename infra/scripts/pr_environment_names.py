@@ -6,12 +6,12 @@ GitHub pull-request number, and the PR head branch, it produces a stable set of
 Azure resource names that respect each service's hard character limits.
 
 Naming scheme (from docs/design/pr-ephemeral-environments.md on the design
-branch): the ``azd`` environment name is ``pr-{number}-{slug}-{hash8}`` where
+branch): the ``azd`` environment name is ``pr-{number}-{slug[:N]}-{hash8}`` where
 
 * ``number`` is the GitHub PR number,
-* ``slug`` is the sanitized slug derived from the stable branch convention
-  ``squad/{issue}-{slug}`` (lowercase letters, digits, hyphens; collapsed
-  separators; trimmed), and
+* ``slug`` is the sanitized and, when needed, display-truncated slug derived from
+  the stable branch convention ``squad/{issue}-{slug}`` (lowercase letters,
+  digits, hyphens; collapsed separators; trimmed), and
 * ``hash8`` is the first 8 lowercase hex chars of
   ``sha256("{repo}|{prNumber}|{slug}")``.
 
@@ -70,6 +70,15 @@ ACR_MAX = 50
 # ``[a-z0-9-]`` and always start with a letter, so they satisfy the rule; we
 # assert the length ceiling defensively.
 VIRTUAL_NETWORK_MAX = 64
+# ARM nested deployment names have a hard 64-character limit. Project Bicep
+# modules follow the pattern ``{module-prefix}-{environment-token}``; the longest
+# module prefix currently present under ``infra/`` is
+# ``private-virtual-network-`` (24 chars), leaving 40 chars for AZURE_ENV_NAME.
+# Keep this bound in the shared helper so deploy, preflight, teardown comments,
+# and janitor-visible tags all agree on one deterministic name.
+ARM_DEPLOYMENT_MAX = 64
+AZD_ENVIRONMENT_MAX = 40
+
 # UNVERIFIED: the Container Apps *managed environment* max length is NOT
 # published (the ARM reference gives only the character pattern, no length), and
 # ``azd`` publishes no documented length limit on environment names either. We
@@ -164,10 +173,33 @@ def _validate_pr_number(pr_number: int) -> None:
         raise ValueError("pr_number must be a positive integer")
 
 
+def _truncate_slug(slug: str, budget: int) -> str:
+    if budget < 1:
+        raise ValueError("environment name cannot fit any slug token")
+    truncated = slug[:budget].strip("-")
+    if not truncated:
+        raise ValueError(f"slug {slug!r} is empty after environment-name truncation")
+    return truncated
+
+
 def environment_name(pr_number: int, slug: str, digest: str) -> str:
-    """The human-readable, stable ``azd`` environment name."""
+    """The human-readable, stable ``azd`` environment name.
+
+    Shape is always ``pr-{number}-{slug[:N]}-{hash8}``; the hash is computed from
+    the full sanitized slug, while only the displayed slug token is truncated.
+    """
     _validate_pr_number(pr_number)
-    return f"pr-{pr_number}-{slug}-{digest}"
+    prefix = f"pr-{pr_number}-"
+    suffix = f"-{digest}"
+    budget = AZD_ENVIRONMENT_MAX - len(prefix) - len(suffix)
+    slug_token = _truncate_slug(slug, budget)
+    name = f"{prefix}{slug_token}{suffix}"
+    if len(name) > AZD_ENVIRONMENT_MAX:
+        raise ValueError(
+            f"generated environment name {name!r} exceeds "
+            f"{AZD_ENVIRONMENT_MAX} chars"
+        )
+    return name
 
 
 def storage_account_name(pr_number: int, digest: str) -> str:

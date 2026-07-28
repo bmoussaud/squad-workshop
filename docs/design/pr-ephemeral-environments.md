@@ -52,11 +52,11 @@ The shared Foundry deployment controls scarce `gpt-image-2` quota. Current valid
 The `azd` environment name is:
 
 ```text
-pr-{number}-{slug}-{hash8}
+pr-{number}-{slug[:N]}-{hash8}
 ```
 
 - `number`: GitHub PR number.
-- `slug`: sanitized meaningful slug derived from the stable branch convention `squad/{issue}-{slug}`. Use lowercase letters, digits, and hyphens; collapse separators; trim leading/trailing hyphens.
+- `slug`: sanitized meaningful slug derived from the stable branch convention `squad/{issue}-{slug}`. Use lowercase letters, digits, and hyphens; collapse separators; trim leading/trailing hyphens. Truncate the displayed slug token as needed so the full `azd` environment name is ≤40 characters.
 - `hash8`: first 8 lowercase hexadecimal characters of `sha256(repo|prNumber|slug)`.
 
 Worked example for PR #14 from branch `squad/14-render-card-layout`:
@@ -72,7 +72,7 @@ Per-resource compaction rules:
 - Storage accounts: lowercase letters and digits only, length 3-24. Do not include hyphens. Use `stfcpr{number}{hash8}` and truncate only the numeric PR token if Azure ever rejects length, preserving `hash8`.
 - Azure Container Registry names: alphanumeric only, length 5-50. PR environments do not create registries; they reference the shared ACR.
 - Container Apps: length ≤32. Use `ca-fc-pr{number}-{slugCompact}-{hash8}` where `slugCompact` is built from the first character of each slug word, then extended from left to right only while the full name remains ≤32.
-- Resource groups, managed environments, identities, Application Insights, action groups, and budgets should use the full `azd` environment name where service limits allow; otherwise use the same `pr{number}` + `hash8` compaction.
+- Resource groups, managed environments, identities, Application Insights, action groups, and budgets should use the bounded `azd` environment name where service limits allow; otherwise use the same `pr{number}` + `hash8` compaction.
 - The existing `ca-fantasy-cards-${env}` pattern cannot be reused as-is for PR environments. For `pr-14-render-card-layout-4717e5bb`, it would exceed the 32-character Container App limit before adding any private-app suffix.
 
 ## GitHub Actions workflow design

@@ -290,6 +290,16 @@ Detector contract: `requires:foundry` is the explicit opt-in label for the Found
 Testing/review outcome: Switch approved with changes after mutation testing caught 11/11 requested mutations, including exact/case-sensitive path matching, literal label matching, and the preflight gate-order invariant. Rai moved from 🔴 RED twice to 🟡 YELLOW after deploy-time integrity checks and trusted-context job guards were added. Fact Checker verified the fork-OIDC path stops at GitHub's read-only fork token/no `id-token` elevation boundary, making the prior finding defense-in-depth rather than live credential exfiltration.
 **Why:** Foundry/model provisioning is scarce and billable, so approval must be the only provisioning authority. PR-controlled detection can help route review but cannot enforce cost/security boundaries. Trusted job-level guards, fail-closed `DEPLOY_FOUNDRY=false`, deploy-time IaC switch integrity checks, explicit close-time teardown, and pinned tests make the remaining Phase 6 behavior intentional and reviewable.
 
+### 2026-07-28: Keep PR-environment branch convention, surface blocked diagnostics
+**By:** Tank
+**What:** PR Azure Environment still requires branches that feed ephemeral Azure naming to match `squad/{issue}-{slug}`; workflow helper commands now capture and print non-zero diagnostic output before enforcing failures.
+**Why:** `pr_preflight.py` exit 3 is a valid policy BLOCKED verdict, not a crash. Printing the verdict preserves the gate while making branch-name and cap failures self-diagnosing in Actions logs.
+
+### 2026-07-28T12:01:41+02:00: PR Azure OIDC subject must use immutable owner/repository IDs (consolidated)
+**By:** Tank, Fact Checker
+**What:** The `azure-pr-app` Entra federated credential for this repository must match GitHub's emitted immutable subject exactly: `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`. PR #45 deploy and PR #44 teardown failures are Azure-side OIDC federation mismatches, not PR content or branch-derived behavior.
+**Why:** Azure login fails before any provision/delete operation with AADSTS700213 when Entra cannot find an exact issuer/audience/subject match. Fact Checker verified the ID-qualified subject is expected for this repository because it was created after GitHub's 2026-07-15 immutable OIDC subject change; GitHub's OIDC customization API reports the same default `sub_claim_prefix`, and the subject was stable across observed runs. Do not broaden the credential; match the emitted subject case-sensitively.
+
 ## Governance
 
 - All meaningful changes require team consensus
@@ -332,3 +342,44 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **By:** Scribe (process learning from Tank and Fact Checker)
 **What:** For governance decisions involving compliance, data residency, safety gates, or billable/cloud approval, use independent parallel verification by at least two uncorrelated agents when the fact pattern is material and reversible cost or risk depends on it. The agents should not rely on each other's findings before reporting; Scribe/coordinator then reconciles convergent or conflicting evidence.
 **Why:** Tank and Fact Checker independently caught a factual error in an already-signed-off Foundry governance decision: `GlobalStandard` was incorrectly treated as EU-only. The independent convergence provided enough confidence to reopen, correct, and re-decide issue #2 before production notice wording or approval gates propagated the false premise.
+
+### 2026-07-28T11:41:20+02:00: Issue #41 accessible green palette revision
+**By:** Neo
+**What:** Independently revised the rejected green-background palette after Switch's accessibility rejection. The new palette uses `--paper: #e4f1df`, `--surface: #f7fcf4`, masthead `rgba(228, 241, 223, 0.96)`, result `#d8ecd2`, `--muted: #556052`, `--coral: #9e3a31`, `--gold: #7a5d16`, and shared border/line color `#697564`.
+**Why:** Baseline original contrast was ink 14.36/15.65/13.91, muted 5.13/5.59/4.97, coral 4.13/4.50/4.00, gold 2.39/2.61/2.32 across paper/surface/result. Trinity's green regressed muted on result and all coral/gold surfaces: ink 13.67/15.13/12.47, muted 4.88/5.40/4.45, coral 3.93/4.35/3.58, gold 2.28/2.52/2.08. Neo's revised green keeps the page visibly sage-green and raises revised ratios to ink 13.61/15.31/12.78, muted 5.64/6.35/5.30, coral 5.78/6.50/5.43, gold 5.27/5.93/4.95, line/borders 4.15/4.66/3.89.
+**Validation:** `python -m uv run python -m unittest discover -s tests` passed after updating the static CSS contract for the new hex values.
+
+### 2026-07-28T11:36:33+02:00: Switch rejected issue #41 green-background revision
+**By:** Switch
+**What:** Reject Trinity's commit `d9b6e49` for issue #41 because the selected green palette fails WCAG contrast review. Trinity is locked out from revising this artifact; Neo owns the next visual/palette revision independently.
+**Why:** Blocking contrast failures against the new green result/background colors include muted text `#68675f` on `#d2ead2` at 4.45:1 (<4.5), gold glyph `#c8972d` on `#d2ead2` at 2.08:1 (<3), and coral eyebrow `#c84d3f` below normal-text AA on `#dff3df`, `#f4fbf4`, and `#d2ead2`. Full suite rerun passed: 278 tests OK.
+
+### 2026-07-28: Green background palette for issue #41
+**By:** Trinity
+**What:** Use `--paper: #dff3df` for the page background, `--surface: #f4fbf4` for the workspace, `rgba(223, 243, 223, 0.96)` for the masthead, and `#d2ead2` for the result pane.
+**Why:** Product only specified the page green; these dependent values replace paper-matched warm neutrals with a coherent light green family while preserving readable contrast with existing text colors.
+
+### 2026-07-28: PR environments use Consumption profile without dedicated capacity bounds
+**By:** Tank
+**What:** The Container Apps templates now map `workloadProfileType == 'Consumption'` to the built-in `Consumption` workload profile and omit dedicated `minimumCount`/`maximumCount`; non-Consumption profiles still use the `dedicated` profile with explicit bounds.
+**Why:** PR workflow sets min count `0` deliberately for scale-to-zero cost control. ARM validates dedicated profile minimum counts as `>= 1`; using the Consumption profile preserves the PR cost intent instead of forcing always-on dedicated nodes.
+
+### 2026-07-28: Bound PR AZURE_ENV_NAME for ARM deployment-name safety
+**By:** Tank
+**What:** `AZURE_ENV_NAME` for PR environments is capped at 40 characters while retaining `pr-{number}-` and the existing `hash8`; only the displayed slug token is truncated.
+**Why:** ARM nested deployment names are limited to 64 chars. The longest module-name prefix currently present in `infra/` is `private-virtual-network-` (24 chars), so the shared environment token must be ≤40 chars to keep every `{module-prefix}-{AZURE_ENV_NAME}` deployment name valid.
+**Scope:** The shared `pr_environment_names.py` helper is authoritative for preflight and deploy. Teardown and janitor remain tag-scoped by `pr-number` and do not derive resource names independently.
+
+### 2026-07-28: Compact PR nested deployment names
+**By:** Tank
+**What:** Nested Bicep module deployment names use the compact PR Container Apps environment token when present instead of the full `AZURE_ENV_NAME`.
+**Why:** ARM deployment names are capped at 64 chars; long PR slugs can fit Azure resource names via the naming module but still overflow nested deployment names when prefixed (`foundry-...`).
+
+**Update:** The same 64-character ARM deployment-name cap also applies to child modules inside `foundry.bicep`. Foundry internals now use a deterministic compact `uniqueString` token for module deployment operation names; resource names are unchanged.
+
+**Status:** Historical interim mitigation, superseded by the root-cause `AZURE_ENV_NAME` 40-character budget. Keep the 64-character module-deployment regression test as the durable guardrail.
+
+### 2026-07-28: Add immutable GitHub OIDC credential for PR Azure environment
+**By:** Tank
+**What:** Added Entra federated credential `github-pr-app-environment-immutable` on `squad-workshop-pr-envs` for exact subject `repo:bmoussaud@283453/squad-workshop@1308580663:environment:azure-pr-app`.
+**Why:** The repo uses GitHub's immutable OIDC subject format; the only existing credential was legacy `repo:bmoussaud/squad-workshop:environment:azure-pr-app`, causing AADSTS700213 in deploy, teardown, and janitor jobs using `azure-pr-app`.
