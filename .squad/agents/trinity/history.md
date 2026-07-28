@@ -40,3 +40,9 @@ Added `infra/scripts/pr_env_reaper.py` + `tests/test_pr_env_reaper.py` (53 tests
 📌 Team update (2026-07-27T21:30:07+02:00): Rai proved the reaper allowlist adversarially (🟢 GREEN) — hostile JSON including odd-cased/whitespace tags, tags:null, bool ephemeral, naive timestamps, non-ASCII pr-number, embedded newlines all KEEP, never reap. Rai's security chain: malformed input → exit 3 → janitor set -e+pipefail → run fails → no delete. — reviewed by Rai
 
 📌 Team update (2026-07-27T21:30:07+02:00): Switch found that `MALFORMED_INPUT_EXIT_CODE=0` mutation survived the entire test suite (tautological assert). Switch added `test_malformed_input_exit_code_is_a_nonzero_literal` pinning the constant to concrete `3`. This was a real security finding: the exit code was carrying Rai's malformed-input safety guarantee but nothing pinned it to a non-zero value. 245→246 tests. — decided by Switch
+
+## 2026-07-28 — Phase 5 (#18): Log Analytics workspace name
+- Added log_analytics field to PrEnvironmentNames in infra/scripts/pr_environment_names.py, mirroring pplication_insights: LOG_ANALYTICS_MAX = 63, derived via _compact_or_full (deterministic, fail-closed, preserves hash8), added to printable_fields() and BICEPPARAM_ENV_VARS -> LOG_ANALYTICS_WORKSPACE_NAME.
+- Extended tests with LogAnalyticsTests (determinism, 63-char boundary verbatim, 64-char overflow compaction, pathological slug, printable/envvars) + updated mapping assertion. Suite 246 -> 252, all green.
+- Shared-worktree hazard: concurrent branch switch to `work` clobbered my uncommitted module edits once; reapplied and committed promptly.
+📌 Team update (2026-07-28T08:22:20+02:00): Phase 5/#18 accepted Trinity's deterministic `log_analytics` name. Coordinator fuzzing found 0 Azure rule violations and Switch caught 7/7 naming mutations. The shared-worktree clobbering hazard Trinity reported is recorded for coordination hygiene. — decided by Trinity, reviewed by Switch and coordinator
