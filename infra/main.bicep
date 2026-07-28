@@ -211,6 +211,7 @@ output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output AZURE_OPENAI_ENDPOINT string = foundry.outputs.openAiEndpoint
 output AZURE_OPENAI_DEPLOYMENT_NAME string = modelDeploymentName
 output AZURE_CLIENT_ID string = foundry.outputs.applicationIdentityClientId
+@secure()
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = foundry.outputs.applicationInsightsConnectionString
 output SERVICE_WEB_URI string = web.outputs.serviceUri
 output AZURE_CONTAINER_APP_NAME string = web.outputs.containerAppName
