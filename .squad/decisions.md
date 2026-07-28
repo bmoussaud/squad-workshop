@@ -335,3 +335,8 @@ Testing/review outcome: Switch approved with changes after mutation testing caug
 **What:** The PR environment cap now counts only tagged app-tier resource groups whose `pr-number` maps to an OPEN pull request, excluding the current PR. Tagged app-tier groups for closed or merged PRs are treated as orphans: deployment warns about them, the count remains fail-closed for live open-PR environments, and the janitor runs after teardown completion as well as on schedule to reclaim leaks.
 **Why:** PR #64 was blocked by orphaned app-tier resource groups from closed/closing PRs, not by real concurrent demand. The janitor had not previously run and earlier teardown attempts failed on OIDC federation, so tag-only Azure counting let stale resource groups consume the 4/3 cap.
 **Open recommendations:** Do not raise `APP_TIER_CONCURRENCY_CAP` above 3 based on this incident; evidence supports orphan cleanup rather than increased real demand. Consider skipping app-tier provisioning entirely for docs/CSS/template/test-only PRs like #64.
+
+### 2026-07-28T17:36:00+02:00: Markdown-aware PR ownership references
+**By:** Switch
+**What:** The CI ownership gate recognizes unique closing references only in genuine top-level Markdown prose. Code spans, fenced and indented code blocks, blockquotes, and Markdown tables are documentation or quotation and do not close issues. The gate remains fail-closed: exactly one unique issue is required. The PR body remains environment-backed and is never interpolated into the workflow run script.
+**Why:** Plain-text matching counted documented syntax as issue closures and rejected valid PRs.

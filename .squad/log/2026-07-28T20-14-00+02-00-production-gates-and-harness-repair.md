@@ -1,0 +1,9 @@
+# Production gates and harness repair
+
+- **Harness defect fixed (#48/PR #56):** the coordinator canary in `.github/copilot-instructions.md` applied to every session even though `squad.agent.md` is injected only for coordinators. Four worker sessions today and four older orphaned worktrees stopped within about two minutes with clean worktrees.
+- **Harness defect open (#54):** `rename_branch` creates `bmoussaud-{name}`, but preflight requires `squad/{issue}-{slug}` and hard-fails `invalid_names`. Four repairs were needed today (#50->#57, #52->#55, #51->#56, #53->#59).
+- A rapid clean-worktree idle is a silent no-op warning, not evidence of success. Never rename an existing branch: GitHub's branch-rename API closed PR #44 instead of retargeting it.
+- Run tests as `PYTHONPATH=src python -m pytest`; a bare invocation can import a sibling worktree's `fantasy_cards`, creating false failures. `uv` is not on PATH. The resulting false issue #65 was caught and closed by Switch.
+- Independent corrections were sound: Rai required SHA-256 idempotency keys rather than prompt text; Switch identified the phantom red build; Trinity checked a relayed claim against Microsoft Learn. Rai and Morpheus independently converged on ~37-day effective retention, SHA-256 keys, and lack of durable user identity behind bearer artifact URLs.
+- The `app_concurrency_cap` refusal at 4/3 ephemeral PR environments worked as designed; four simultaneous PRs exceeded the configured capacity rail.
+- Archive gate result: `decisions.md` was 65,927 bytes, so both thresholds were evaluated. No decision entry was older than the 30-day cutoff (2026-06-28T20:14:00+02:00) or the 7-day cutoff (2026-07-21T20:14:00+02:00); archival removed nothing. This makes the size gate unable to reduce the file on this run, directly relevant to #47.
