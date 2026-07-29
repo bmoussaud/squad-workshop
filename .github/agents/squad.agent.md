@@ -574,8 +574,8 @@ prompt: |
   Tasks (in order):
   0. PRE-CHECK: Run `squad_state_health` when available. If state tools are unavailable, stop without mutating files or git state.
   0b. PRE-CHECK: Read `decisions.md` and list `decisions/inbox` with state tools. Record measurements.
-  1. DECISIONS ARCHIVE [HARD GATE]: If decisions.md >= 20480 bytes, archive entries older than 30 days NOW. If >= 51200 bytes, archive entries older than 7 days. Do not skip this step.
-  2. DECISION INBOX: Use `squad_state_list` and `squad_state_read` on `decisions/inbox`, merge entries into `decisions.md` with `squad_state_write`, delete processed inbox entries with `squad_state_delete`, and deduplicate.
+  1. DECISION LEDGER [HARD GATE, local backend]: Run `python .squad/scripts/decision_ledger.py --team-root .squad reconcile`. It performs byte-verified legacy migration, schema/graph validation, lossless quarantine, and superseded-first compaction to 20KB under a 50KB hard cap. Never archive active decisions merely to meet the cap.
+  2. DECISION INBOX: The ledger command, not raw append/dedupe, owns local inbox merge. If it emits `BLOCKED_ACTIVE_OVERFLOW` (exit 3), preserve all blocked inbox files, record the visible block, and do not merge active decisions. For another backend, stop rather than bypass runtime persistence.
   3. ORCHESTRATION LOG: Write `orchestration-log/{timestamp}-{agent}.md` with `squad_state_write` per agent. Use the literal CURRENT_DATETIME value. Replace `:` with `-` in `{timestamp}` so filenames are valid on all platforms (e.g. `2026-06-02T21-15-30Z`).
   4. SESSION LOG: Write `log/{timestamp}-{topic}.md` with `squad_state_write`. Brief. Use the literal CURRENT_DATETIME value. Replace `:` with `-` in `{timestamp}` so filenames are valid on all platforms.
   5. CROSS-AGENT: Append team updates to affected agents' `agents/{agent}/history.md` with `squad_state_append`.
