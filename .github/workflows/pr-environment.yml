@@ -3,12 +3,12 @@
 # Design: docs/design/pr-ephemeral-environments.md (sections "Deployment path",
 # "Workflow concurrency", "Cost & lifecycle", "Security guardrails").
 #
-# SECURITY MODEL (why this uses `pull_request`, never `pull_request_target`):
-# `pull_request` runs in the *head* context with a read-only token and NO access
-# to the `azure-pr-app` environment's OIDC federation for forks, so a fork PR can
-# never obtain Azure credentials. `pull_request_target` would run privileged in
-# the base context and hand fork code write access + secrets -- exactly what we
-# refuse to do, including "just for the comment step".
+# SECURITY MODEL:
+# This uses `pull_request_target` so GitHub evaluates this workflow from the base
+# branch rather than the PR merge ref. The workflow never executes head code
+# before its trusted job-level fork/same-repository/draft conditions. Preflight
+# checks out the head SHA only as data, with credentials disabled, for the
+# base-ref detector to inspect.
 #
 # Two-layer gate:
 #  1. infra/scripts/pr_preflight.py owns the full verdict and reason codes
@@ -17,8 +17,8 @@
 #     `github.event.pull_request.head.repo.fork` was a live fail-open bug.
 #  2. Privileged jobs independently re-assert the non-forgeable subset
 #     (not-fork, same-repo, non-draft) from GitHub event context before trusting
-#     any preflight output, because this `pull_request` workflow checks out PR
-#     head code and the scripts themselves are PR-supplied.
+#     any preflight output. The policy executables are checked out from the
+#     immutable base SHA, while switch inspection reads unexecuted PR content.
 #
 # `closed` teardown + daily TTL janitor are Phase 4 (#20);
 # budget/observability tuning is Phase 5 (#18). Phase 6 (#17 / #2) adds a
@@ -28,7 +28,7 @@
 name: PR Azure Environment
 
 on:
-  pull_request:
+  pull_request_target:
     # `ready_for_review` is included deliberately: draft PRs are a preflight SKIP
     # (no deploy). Marking a draft ready does not emit `synchronize` on its own,
     # so without this type a PR opened as draft would never deploy on the
@@ -47,8 +47,8 @@ concurrency:
 
 jobs:
   # --- Gate: fork / draft / same-repo / name validity ------------------------
-  # No Azure permissions, no id-token. Consumes pr_preflight.py's full verdict;
-  # privileged jobs below still re-check the trusted event-context subset.
+  # No Azure permissions, no id-token. Executes base-ref policy code against PR
+  # metadata/content; privileged jobs below still re-check event-context trust.
   preflight:
     name: Preflight gate
     runs-on: ubuntu-latest
@@ -61,7 +61,33 @@ jobs:
       requires_foundry: ${{ steps.scope.outputs.requires_foundry }}
       live_validation_requested: ${{ steps.scope.outputs.live_validation_requested }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check out trusted preflight policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .trusted-policy
+          persist-credentials: false
+          fetch-depth: 1
+
+      # This checkout is never executed. The trusted base detector reads only the
+      # specific Bicep files it needs to inspect as PR data.
+      - name: Check out PR content for trusted inspection
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .pr-content
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify checked out revisions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C .trusted-policy rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C .pr-content rev-parse HEAD)" = "$HEAD_SHA"
 
       - name: Collect detector inputs
         id: detector-inputs
@@ -92,9 +118,10 @@ jobs:
           LABELS_FILE: ${{ steps.detector-inputs.outputs.labels_file }}
         run: |
           set -euo pipefail
-          python3 infra/scripts/pr_foundry_scope.py \
+          python3 .trusted-policy/infra/scripts/pr_foundry_scope.py \
             --changed-paths-file "$CHANGED_PATHS_FILE" \
             --labels-file "$LABELS_FILE" \
+            --repo-root .pr-content \
             --format github >> "$GITHUB_OUTPUT"
 
       - name: Evaluate deploy preflight
@@ -119,7 +146,7 @@ jobs:
           # cap because the post-login recheck re-runs pr_preflight with the real
           # count and fails the run on BLOCKED.
           set +e
-          output="$(python3 infra/scripts/pr_preflight.py \
+          output="$(python3 .trusted-policy/infra/scripts/pr_preflight.py \
             --repo "$BASE_REPO" \
             --pr-number "$PR_NUMBER" \
             --branch "$HEAD_BRANCH" \
@@ -182,9 +209,8 @@ jobs:
   # --- Deploy: OIDC login, provision, deploy, smoke --------------------------
   # id-token: write lives ONLY on this job (requirement #3). The job-level `if`
   # has trusted-context fork/same-repo/draft guards from the GitHub event payload
-  # before consulting preflight outputs, because preflight runs from PR head code.
-  # Follow-up: running detector/preflight from base-ref content would be stronger,
-  # but is intentionally out of scope for this Phase 6 ship fix.
+  # before consulting preflight outputs. The workflow definition and policy code
+  # both come from the trusted base context.
   deploy:
     name: Provision and deploy
     needs: [preflight, foundry_exception]
@@ -215,7 +241,21 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # This job's trusted event-context condition excludes forks before checkout.
+      - name: Check out reviewed PR content
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify reviewed PR revision
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
 
       - name: Install azd
         uses: Azure/setup-azd@634ad924cf8baef2257898ba5663be8d19f15aca # v2.3.0
