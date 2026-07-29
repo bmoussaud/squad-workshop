@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 import os
 import unittest
 from pathlib import Path
@@ -8,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import UUID
 
+from itsdangerous import URLSafeTimedSerializer
+
 MAX_REQUEST_BYTES = 16 * 1024
 
 
@@ -16,6 +19,10 @@ def assert_canonical_uuid(test_case: unittest.TestCase, value: str) -> None:
 
 
 class WebAcceptanceTests(unittest.TestCase):
+    owner_subject = "opaque-owner-a"
+    csrf_token = "csrf-test-token"
+    session_secret = "s" * 48
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -26,15 +33,40 @@ class WebAcceptanceTests(unittest.TestCase):
             "FANTASY_CARD_MAX_GENERATION_CONCURRENCY": "1",
             "FANTASY_CARD_RATE_LIMIT_ATTEMPTS": "10",
             "FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS": "600",
+            "AZURE_TENANT_ID": "11111111-1111-4111-8111-111111111111",
+            "FANTASY_CARD_OIDC_CLIENT_ID": "22222222-2222-4222-8222-222222222222",
+            "FANTASY_CARD_OIDC_CLIENT_SECRET": "test-client-credential",
+            "FANTASY_CARD_APPLICATION_BASE_URL": "http://localhost:8000",
+            "FANTASY_CARD_SESSION_SECRET_CURRENT": self.session_secret,
             "USERPROFILE": str(Path.home()),
         }
 
-    def create_client(self):
+    def create_client(self, authenticated: bool = True):
         from fastapi.testclient import TestClient
 
         from fantasy_cards.web import create_app
 
-        return TestClient(create_app())
+        client = TestClient(create_app())
+        if authenticated:
+            self.authenticate_client(client)
+        return client
+
+    def authenticate_client(self, client: object) -> None:
+        serializer = URLSafeTimedSerializer(
+            self.session_secret,
+            salt="fantasy-cards-session-v1",
+            signer_kwargs={"digest_method": sha256},
+        )
+        client.cookies.set(
+            "fantasy-cards-session",
+            serializer.dumps(
+                {
+                    "owner_subject": self.owner_subject,
+                    "csrf_token": self.csrf_token,
+                }
+            ),
+        )
+        client.headers["X-CSRF-Token"] = self.csrf_token
 
     def test_initial_html_has_semantic_labels_and_offline_health(self) -> None:
         with patch.dict(os.environ, self.environment, clear=True), patch(
@@ -82,11 +114,11 @@ class WebAcceptanceTests(unittest.TestCase):
             html,
         )
         self.assertIn(
-            "Generated image files are stored in a non-public Azure Blob container. "
+            "Generated image files are stored in a non-public Azure Blob container "
+            "and can be retrieved only by the signed-in user who created them. "
             "They are scheduled for lifecycle deletion no sooner than 30 days after "
             "creation; deleted files may remain recoverable for up to seven additional "
-            "days. Anyone who has an artifact URL can retrieve its image; there is no "
-            "per-user access control.",
+            "days.",
             html,
         )
         self.assertIn(
@@ -170,7 +202,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertEqual(artifact_response.status_code, 200)
         self.assertEqual(artifact_response.headers["content-type"], "image/png")
         self.assertEqual(
-            artifact_response.headers["cache-control"], "private, max-age=3600"
+            artifact_response.headers["cache-control"], "private, no-store"
         )
         self.assertEqual(
             artifact_response.headers["x-content-type-options"], "nosniff"
@@ -373,6 +405,7 @@ class WebAcceptanceTests(unittest.TestCase):
             from fantasy_cards.web import create_app
 
             with TestClient(create_app(application=application)) as client:
+                self.authenticate_client(client)
                 response = client.post(
                     "/api/generations",
                     json={"title": "Ember Sentinel", "description": "A safe prompt"},
@@ -567,6 +600,7 @@ class WebAcceptanceTests(unittest.TestCase):
                     from fantasy_cards.web import create_app
 
                     with TestClient(create_app(application=application)) as client:
+                        self.authenticate_client(client)
                         response = client.get(
                             f"/api/artifacts/{artifact_id}",
                             headers={"X-Correlation-ID": "invalid-internal-value"},
@@ -579,7 +613,7 @@ class WebAcceptanceTests(unittest.TestCase):
                 self.assertNotIn(private_detail, response.text)
                 self.assertNotIn("invalid-internal-value", response.text)
                 self.assertNotIn("location", response.headers)
-                reader.read.assert_called_once_with(artifact_id)
+                reader.read.assert_called_once_with(artifact_id, self.owner_subject)
 
     def assert_error_envelope(self, response: object, expected_code: str) -> None:
         payload = response.json()

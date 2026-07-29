@@ -31,7 +31,9 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
             clear=True,
         ):
             application = build_local_application(client_factory=Mock())
-            artifact = application.artifact_store.save(b"content", "text/plain")
+            artifact = application.artifact_store.save(
+                b"content", "text/plain", "local-test"
+            )
 
         self.assertEqual(Path(artifact.file_path).parent, Path(output_directory))
 

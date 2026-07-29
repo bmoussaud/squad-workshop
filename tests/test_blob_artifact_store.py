@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 class BlobArtifactStoreContractTests(unittest.TestCase):
     account_url = "https://cards.blob.core.windows.net"
     container_name = "generated-cards"
+    owner_subject = "opaque-owner-a"
 
     def create_store(self, service_client: Mock):
         from fantasy_cards.adapters import BlobArtifactStore
@@ -16,7 +17,7 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
             service_client=service_client,
         )
 
-    def test_save_uses_opaque_png_name_conditional_create_and_no_metadata(self) -> None:
+    def test_save_uses_opaque_png_name_conditional_create_and_owner_metadata(self) -> None:
         service_client = Mock()
         container_client = service_client.get_container_client.return_value
         blob_client = container_client.get_blob_client.return_value
@@ -24,7 +25,9 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
         store = self.create_store(service_client)
 
         with patch("fantasy_cards.adapters.uuid4", return_value=artifact_id):
-            artifact = store.save(b"png-content", "image/png")
+            artifact = store.save(
+                b"png-content", "image/png", self.owner_subject
+            )
 
         service_client.get_container_client.assert_called_once_with(self.container_name)
         container_client.get_blob_client.assert_called_once_with(f"{artifact_id}.png")
@@ -32,13 +35,14 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
         positional, keywords = blob_client.upload_blob.call_args
         self.assertEqual(positional[0], b"png-content")
         self.assertFalse(keywords.get("overwrite", True))
-        self.assertNotIn("metadata", keywords)
+        self.assertEqual(keywords["metadata"], {"owner_subject": self.owner_subject})
         content_settings = keywords["content_settings"]
         self.assertEqual(content_settings.content_type, "image/png")
         self.assertEqual(artifact.artifact_id, artifact_id)
         self.assertEqual(artifact.file_path, f"{artifact_id}.png")
         self.assertEqual(artifact.media_type, "image/png")
         self.assertEqual(artifact.size_bytes, len(b"png-content"))
+        self.assertEqual(artifact.owner_subject, self.owner_subject)
 
     def test_save_rejects_media_type_and_size_before_sdk_call(self) -> None:
         service_client = Mock()
@@ -48,7 +52,7 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
         for content, media_type in cases:
             with self.subTest(media_type=media_type, size=len(content)):
                 with self.assertRaises(RuntimeError) as raised:
-                    store.save(content, media_type)
+                    store.save(content, media_type, self.owner_subject)
                 self.assertNotIn(media_type, str(raised.exception))
 
         service_client.get_container_client.assert_not_called()
@@ -69,7 +73,7 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
 
         with patch("fantasy_cards.adapters.uuid4", side_effect=ids):
             with self.assertRaises(RuntimeError) as raised:
-                store.save(b"png", "image/png")
+                store.save(b"png", "image/png", self.owner_subject)
 
         self.assertEqual(blob_client.upload_blob.call_count, 3)
         self.assertNotIn("collision", str(raised.exception))
@@ -81,24 +85,47 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
         container_client = service_client.get_container_client.return_value
         blob_client = container_client.get_blob_client.return_value
         downloader = blob_client.download_blob.return_value
-        downloader.properties = SimpleNamespace(
+        blob_client.get_blob_properties.return_value = SimpleNamespace(
             size=3,
             content_settings=SimpleNamespace(content_type="image/png"),
+            metadata={"owner_subject": self.owner_subject},
         )
         downloader.readall.return_value = b"png"
         store = self.create_store(service_client)
 
         with self.assertRaises(RuntimeError):
-            store.read("not-a-uuid")
+            store.read("not-a-uuid", self.owner_subject)
         service_client.get_container_client.assert_not_called()
 
         artifact_id = "11111111-1111-4111-8111-111111111111"
-        content = store.read(artifact_id)
+        content = store.read(artifact_id, self.owner_subject)
 
         container_client.get_blob_client.assert_called_once_with(f"{artifact_id}.png")
         self.assertEqual(content.content, b"png")
         self.assertEqual(content.media_type, "image/png")
         self.assertEqual(content.size_bytes, 3)
+
+    def test_read_checks_owner_metadata_before_downloading_content(self) -> None:
+        from fantasy_cards.adapters import ArtifactNotFoundError
+
+        service_client = Mock()
+        blob_client = (
+            service_client.get_container_client.return_value.get_blob_client.return_value
+        )
+        blob_client.get_blob_properties.return_value = SimpleNamespace(
+            size=3,
+            content_settings=SimpleNamespace(content_type="image/png"),
+            metadata={"owner_subject": "owner-a"},
+        )
+        store = self.create_store(service_client)
+
+        with self.assertRaises(ArtifactNotFoundError):
+            store.read(
+                "11111111-1111-4111-8111-111111111111",
+                "owner-b",
+            )
+
+        blob_client.download_blob.assert_not_called()
 
     def test_configuration_uses_token_credential_and_rejects_secret_auth(self) -> None:
         from fantasy_cards.config import ConfigurationError, build_web_application

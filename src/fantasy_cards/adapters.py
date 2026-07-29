@@ -26,6 +26,7 @@ from fantasy_cards.domain import (
     ArtifactContent,
     GeneratedImage,
     GenerationJob,
+    is_valid_owner_subject,
 )
 from fantasy_cards.telemetry import dependency_span, record_span_outcome
 
@@ -343,8 +344,11 @@ class InMemoryArtifactStore:
     def __init__(self, output_directory: str | Path = "artifacts") -> None:
         self._output_directory = Path(output_directory)
         self._content: dict[str, bytes] = {}
+        self._owners: dict[str, str] = {}
 
-    def save(self, content: bytes, media_type: str) -> Artifact:
+    def save(self, content: bytes, media_type: str, owner_subject: str) -> Artifact:
+        if not is_valid_owner_subject(owner_subject):
+            raise ValueError("owner_subject must not be blank")
         artifact_id = str(uuid4())
         extension = _ARTIFACT_EXTENSIONS.get(media_type, ".bin")
         self._output_directory.mkdir(parents=True, exist_ok=True)
@@ -365,14 +369,21 @@ class InMemoryArtifactStore:
                 temporary_path.unlink(missing_ok=True)
 
         self._content[artifact_id] = content
+        self._owners[artifact_id] = owner_subject
         return Artifact(
             artifact_id=artifact_id,
             media_type=media_type,
             size_bytes=len(content),
             file_path=str(file_path),
+            owner_subject=owner_subject,
         )
 
-    def read(self, artifact_id: str) -> ArtifactContent:
+    def read(self, artifact_id: str, owner_subject: str) -> ArtifactContent:
+        if (
+            not is_valid_owner_subject(owner_subject)
+            or self._owners.get(artifact_id) != owner_subject
+        ):
+            raise KeyError(artifact_id)
         content = self._content[artifact_id]
         path = next(self._output_directory.glob(f"{artifact_id}.*"), None)
         media_type = "image/png" if path and path.suffix == ".png" else "text/plain"
@@ -408,8 +419,13 @@ class BlobArtifactStore:
         self._container_name = container_name
         self._service_client = service_client
 
-    def save(self, content: bytes, media_type: str) -> Artifact:
-        if media_type != "image/png" or not content or len(content) > _MAX_WEB_ARTIFACT_BYTES:
+    def save(self, content: bytes, media_type: str, owner_subject: str) -> Artifact:
+        if (
+            media_type != "image/png"
+            or not content
+            or len(content) > _MAX_WEB_ARTIFACT_BYTES
+            or not is_valid_owner_subject(owner_subject)
+        ):
             raise ArtifactStorageError(
                 "artifact_unavailable", "The generated artifact could not be stored."
             )
@@ -426,6 +442,7 @@ class BlobArtifactStore:
                         content,
                         overwrite=False,
                         content_settings=ContentSettings(content_type="image/png"),
+                        metadata={"owner_subject": owner_subject},
                     )
                 except ResourceExistsError:
                     continue
@@ -445,13 +462,14 @@ class BlobArtifactStore:
                     media_type="image/png",
                     size_bytes=len(content),
                     file_path=blob_name,
+                    owner_subject=owner_subject,
                 )
             record_span_outcome(span, "failed", error_code="artifact_unavailable")
             raise ArtifactStorageError(
                 "artifact_unavailable", "The generated artifact could not be stored."
             )
 
-    def read(self, artifact_id: str) -> ArtifactContent:
+    def read(self, artifact_id: str, owner_subject: str) -> ArtifactContent:
         from azure.core.exceptions import ResourceNotFoundError
 
         try:
@@ -463,10 +481,16 @@ class BlobArtifactStore:
 
         with dependency_span("blob", "read") as span:
             try:
-                downloader = self._container_client().get_blob_client(
+                blob_client = self._container_client().get_blob_client(
                     f"{artifact_id}.png"
-                ).download_blob(max_concurrency=1)
-                properties = downloader.properties
+                )
+                properties = blob_client.get_blob_properties()
+                metadata = properties.metadata or {}
+                if (
+                    not is_valid_owner_subject(owner_subject)
+                    or metadata.get("owner_subject") != owner_subject
+                ):
+                    raise ArtifactNotFoundError()
                 size_bytes = int(properties.size)
                 media_type = properties.content_settings.content_type
                 if (
@@ -477,8 +501,9 @@ class BlobArtifactStore:
                     raise ArtifactStorageError(
                         "artifact_unavailable", "The requested artifact is unavailable."
                     )
+                downloader = blob_client.download_blob(max_concurrency=1)
                 content = downloader.readall()
-            except ResourceNotFoundError:
+            except (ResourceNotFoundError, ArtifactNotFoundError):
                 record_span_outcome(span, "not_found", error_code="artifact_not_found")
                 raise ArtifactNotFoundError() from None
             except ArtifactStorageError as error:
@@ -534,13 +559,15 @@ def _translate_blob_error(error: Exception, action: str) -> ArtifactStorageError
 
 class InMemoryJobRepository:
     def __init__(self) -> None:
-        self._jobs: dict[str, GenerationJob] = {}
+        self._jobs: dict[tuple[str, str], GenerationJob] = {}
 
-    def get_by_idempotency_key(self, idempotency_key: str) -> GenerationJob | None:
-        return self._jobs.get(idempotency_key)
+    def get_by_idempotency_key(
+        self, owner_subject: str, idempotency_key: str
+    ) -> GenerationJob | None:
+        return self._jobs.get((owner_subject, idempotency_key))
 
     def save(self, job: GenerationJob) -> None:
-        self._jobs[job.idempotency_key] = job
+        self._jobs[(job.artifact.owner_subject, job.idempotency_key)] = job
 
 
 def deterministic_idempotency_key(title: str, prompt: str) -> str:

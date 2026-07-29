@@ -232,8 +232,6 @@ jobs:
     outputs:
       environment_name: ${{ steps.names.outputs.environment_name }}
       app_url: ${{ steps.endpoint.outputs.app_url }}
-      smoke_passed: ${{ steps.smoke.outputs.passed }}
-      smoke_message: ${{ steps.smoke.outputs.message }}
       expires_at: ${{ steps.tags.outputs.expires_at }}
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -353,6 +351,13 @@ jobs:
             echo "AZURE_BUDGET_START_DATE=$(date -u +%Y-%m-01)"
             echo "AZURE_ALERT_CONTACT_EMAILS=${ALERT_CONTACT_EMAILS}"
             echo "AZURE_ENABLE_APPLICATION_SIGNAL_ALERTS=false"
+            # Provision a closed ingress with non-credential placeholders. A fresh
+            # trusted job replaces them before enabling external ingress.
+            echo "FANTASY_CARD_OIDC_CLIENT_ID=00000000-0000-4000-8000-000000000000"
+            echo "FANTASY_CARD_OIDC_CLIENT_SECRET=provisioning-placeholder-only"
+            echo "FANTASY_CARD_SESSION_SECRET_CURRENT=provisioning-placeholder-current-0000"
+            echo "FANTASY_CARD_SESSION_SECRET_PREVIOUS=provisioning-placeholder-previous-000"
+            echo "FANTASY_CARD_EXTERNAL_INGRESS=false"
           } >> "$GITHUB_ENV"
 
       - name: azd auth login (OIDC, no stored secrets)
@@ -363,7 +368,7 @@ jobs:
             --tenant-id "$AZURE_TENANT_ID" \
             --federated-credential-provider github
 
-      - name: Azure CLI login (OIDC, for az group/tag/query)
+      - name: Azure resource login (OIDC, for deployment)
         uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -617,15 +622,180 @@ jobs:
           esac
           echo "app_url=${app_url}" >> "$GITHUB_OUTPUT"
 
+  # --- Trusted authentication configuration ------------------------------
+  # This job intentionally starts on a fresh runner and never checks out the PR
+  # head. Directory automation credentials must not share a process boundary
+  # with scripts, actions, or tools controlled by pull-request code.
+  configure_auth:
+    name: Configure trusted PR authentication
+    needs: [preflight, deploy]
+    if: ${{ needs.preflight.outputs.eligible == 'true' && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: azure-pr-app
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      smoke_passed: ${{ steps.smoke.outputs.passed }}
+      smoke_message: ${{ steps.smoke.outputs.message }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      APP_URL: ${{ needs.deploy.outputs.app_url }}
+      ENVIRONMENT_NAME: ${{ needs.deploy.outputs.environment_name }}
+      OIDC_MARKER: squad-workshop-pr-${{ github.event.pull_request.number }}
+      OIDC_TAG: squad-workshop-pr-auth
+    steps:
+      - name: Check out trusted smoke-test code
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # v3.3.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Directory automation login
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          creds: ${{ secrets.ENTRA_AUTOMATION_CREDENTIALS }}
+          allow-no-subscriptions: true
+
+      - name: Create or rotate the PR OIDC application
+        run: |
+          set -euo pipefail
+          applications="$(az rest --method GET \
+            --url "https://graph.microsoft.com/v1.0/applications?\$filter=displayName%20eq%20'${OIDC_MARKER}'&\$select=id,appId,displayName,tags" \
+            --output json)"
+          match_count="$(jq '.value | length' <<<"$applications")"
+          if [ "$match_count" -gt 1 ]; then
+            echo "::error::More than one Entra application matches the PR marker."
+            exit 1
+          fi
+          if [ "$match_count" -eq 1 ]; then
+            if [ "$(jq --arg tag "$OIDC_TAG" '.value[0].tags // [] | contains([$tag])' <<<"$applications")" != true ]; then
+              echo "::error::The matching Entra application is not marked as a managed PR registration."
+              exit 1
+            fi
+            application_object_id="$(jq -r '.value[0].id' <<<"$applications")"
+            client_id="$(jq -r '.value[0].appId' <<<"$applications")"
+          else
+            application="$(az rest --method POST \
+              --url "https://graph.microsoft.com/v1.0/applications" \
+              --headers 'Content-Type=application/json' \
+              --body "$(jq -cn --arg name "$OIDC_MARKER" \
+                --arg tag "$OIDC_TAG" \
+                --arg callback "${APP_URL}/auth/callback" \
+                '{displayName:$name,signInAudience:"AzureADMyOrg",tags:[$tag],web:{redirectUris:[$callback]}}')" \
+              --output json)"
+            application_object_id="$(jq -r '.id' <<<"$application")"
+            client_id="$(jq -r '.appId' <<<"$application")"
+          fi
+
+          service_principals="$(az rest --method GET \
+            --url "https://graph.microsoft.com/v1.0/servicePrincipals?\$filter=appId%20eq%20'${client_id}'&\$select=id,tags" \
+            --output json)"
+          if [ "$(jq '.value | length' <<<"$service_principals")" -eq 0 ]; then
+            az rest --method POST \
+              --url "https://graph.microsoft.com/v1.0/servicePrincipals" \
+              --headers 'Content-Type=application/json' \
+              --body "$(jq -cn --arg app_id "$client_id" --arg tag "$OIDC_TAG" \
+                '{appId:$app_id,tags:[$tag]}')" \
+              >/dev/null
+          else
+            service_principal_object_id="$(jq -r '.value[0].id' <<<"$service_principals")"
+            az rest --method PATCH \
+              --url "https://graph.microsoft.com/v1.0/servicePrincipals/${service_principal_object_id}" \
+              --headers 'Content-Type=application/json' \
+              --body "$(jq -cn --arg tag "$OIDC_TAG" '{tags:[$tag]}')" \
+              >/dev/null
+          fi
+
+          az rest --method PATCH \
+            --url "https://graph.microsoft.com/v1.0/applications/${application_object_id}" \
+            --headers 'Content-Type=application/json' \
+            --body "$(jq -cn --arg callback "${APP_URL}/auth/callback" \
+              '{web:{redirectUris:[$callback]}}')" \
+            >/dev/null
+
+          expires_at="$(date -u -d '+1 day' '+%Y-%m-%dT%H:%M:%SZ')"
+          credential="$(az rest --method POST \
+            --url "https://graph.microsoft.com/v1.0/applications/${application_object_id}/addPassword" \
+            --headers 'Content-Type=application/json' \
+            --body "$(jq -cn --arg name "pr-${{ github.event.pull_request.number }}-${{ github.run_id }}" \
+              --arg expires "$expires_at" \
+              '{passwordCredential:{displayName:$name,endDateTime:$expires}}')" \
+            --output json)"
+          client_secret="$(jq -r '.secretText' <<<"$credential")"
+          credential_key_id="$(jq -r '.keyId' <<<"$credential")"
+          if [ -z "$client_secret" ] || [ "$client_secret" = null ]; then
+            echo "::error::Microsoft Graph did not return the new OIDC credential."
+            exit 1
+          fi
+
+          session_current="$(openssl rand -hex 32)"
+          session_previous="$(openssl rand -hex 32)"
+          echo "::add-mask::$client_secret"
+          echo "::add-mask::$session_current"
+          echo "::add-mask::$session_previous"
+          {
+            echo "PR_OIDC_APPLICATION_OBJECT_ID=${application_object_id}"
+            echo "PR_OIDC_CLIENT_ID=${client_id}"
+            echo "PR_OIDC_CLIENT_SECRET=${client_secret}"
+            echo "PR_OIDC_CREDENTIAL_KEY_ID=${credential_key_id}"
+            echo "PR_SESSION_SECRET_CURRENT=${session_current}"
+            echo "PR_SESSION_SECRET_PREVIOUS=${session_previous}"
+          } >> "$GITHUB_ENV"
+
+      - name: Clear directory automation session
+        run: |
+          set -euo pipefail
+          az logout
+          az account clear
+
+      - name: Azure resource login
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install trusted authentication configuration and open ingress
+        run: |
+          set -euo pipefail
+          resource_group="rg-${ENVIRONMENT_NAME}"
+          app_name="$(az containerapp list \
+            --resource-group "$resource_group" \
+            --query "[?tags.\"pr-number\"=='${{ github.event.pull_request.number }}'].name | [0]" \
+            --output tsv)"
+          if [ -z "$app_name" ]; then
+            echo "::error::Cannot find the provisioned PR Container App."
+            exit 1
+          fi
+          az containerapp secret set \
+            --resource-group "$resource_group" \
+            --name "$app_name" \
+            --secrets \
+              oidc-client-secret="$PR_OIDC_CLIENT_SECRET" \
+              session-secret-current="$PR_SESSION_SECRET_CURRENT" \
+              session-secret-previous="$PR_SESSION_SECRET_PREVIOUS" \
+            >/dev/null
+          az containerapp update \
+            --resource-group "$resource_group" \
+            --name "$app_name" \
+            --set-env-vars "FANTASY_CARD_OIDC_CLIENT_ID=$PR_OIDC_CLIENT_ID" \
+            >/dev/null
+          az containerapp ingress enable \
+            --resource-group "$resource_group" \
+            --name "$app_name" \
+            --type external \
+            --target-port 8000 \
+            --transport auto \
+            --allow-insecure false \
+            >/dev/null
+
       - name: Smoke test (/health/live + /health/ready)
         id: smoke
-        env:
-          APP_URL: ${{ steps.endpoint.outputs.app_url }}
         run: |
           set -uo pipefail
-          # The URL is an Azure-issued FQDN (not attacker input); still passed
-          # via env for consistency. Non-zero exit (smoke failure) fails the run;
-          # the comment job still posts the failing status via always().
           set +e
           output="$(python3 infra/scripts/pr_smoke_test.py \
             --base-url "$APP_URL" \
@@ -637,17 +807,40 @@ jobs:
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
           exit $rc
 
+      - name: Directory automation login for credential cleanup
+        if: ${{ success() }}
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          creds: ${{ secrets.ENTRA_AUTOMATION_CREDENTIALS }}
+          allow-no-subscriptions: true
+
+      - name: Remove superseded PR OIDC credentials
+        if: ${{ success() }}
+        run: |
+          set -euo pipefail
+          application="$(az rest --method GET \
+            --url "https://graph.microsoft.com/v1.0/applications/${PR_OIDC_APPLICATION_OBJECT_ID}?\$select=passwordCredentials" \
+            --output json)"
+          jq -r --arg keep "$PR_OIDC_CREDENTIAL_KEY_ID" \
+            '.passwordCredentials[] | select(.keyId != $keep) | .keyId' <<<"$application" |
+            while IFS= read -r key_id; do
+              [ -z "$key_id" ] && continue
+              az rest --method POST \
+                --url "https://graph.microsoft.com/v1.0/applications/${PR_OIDC_APPLICATION_OBJECT_ID}/removePassword" \
+                --headers 'Content-Type=application/json' \
+                --body "$(jq -cn --arg key_id "$key_id" '{keyId:$key_id}')" \
+                >/dev/null
+            done
+          az logout
+          az account clear
+
   # --- Optional live Foundry validation: sanitized pass/fail evidence only ----
   live_foundry_validation:
     name: Live Foundry validation
-    needs: [preflight, deploy]
-    if: >-
-      always() &&
-      github.event.pull_request.head.repo.fork == false &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false &&
-      needs.preflight.outputs.live_validation_requested == 'true' &&
-      needs.deploy.result == 'success'
+    needs: [preflight, deploy, configure_auth]
+    # Browser OIDC and CSRF are intentionally not bypassed for CI. The existing
+    # health smoke remains automated; live generation requires a manual user login.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -741,7 +934,7 @@ jobs:
   # (always()) so it reports pass OR fail, but never for fork/draft (skip).
   comment:
     name: Update PR comment
-    needs: [preflight, deploy, live_foundry_validation]
+    needs: [preflight, deploy, configure_auth, live_foundry_validation]
     if: >-
       always() &&
       github.event.pull_request.head.repo.fork == false &&
@@ -758,10 +951,11 @@ jobs:
         env:
           ENV_NAME: ${{ needs.deploy.outputs.environment_name }}
           APP_URL: ${{ needs.deploy.outputs.app_url }}
-          SMOKE_PASSED: ${{ needs.deploy.outputs.smoke_passed }}
-          SMOKE_MESSAGE: ${{ needs.deploy.outputs.smoke_message }}
+          SMOKE_PASSED: ${{ needs.configure_auth.outputs.smoke_passed }}
+          SMOKE_MESSAGE: ${{ needs.configure_auth.outputs.smoke_message }}
           EXPIRES_AT: ${{ needs.deploy.outputs.expires_at }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          AUTH_RESULT: ${{ needs.configure_auth.result }}
           LIVE_VALIDATION_REQUESTED: ${{ needs.preflight.outputs.live_validation_requested }}
           LIVE_VALIDATION_RESULT: ${{ needs.live_foundry_validation.result }}
           LIVE_VALIDATION_STATUS: ${{ needs.live_foundry_validation.outputs.result }}
@@ -775,6 +969,7 @@ jobs:
             // repo) -- only its printable projection reached these outputs.
             const marker = '<!-- pr-azure-env -->';
             const deployOk = process.env.DEPLOY_RESULT === 'success';
+            const authOk = process.env.AUTH_RESULT === 'success';
             const smokePassed = process.env.SMOKE_PASSED === 'true';
             const envName = process.env.ENV_NAME || '(name unavailable)';
             const appUrl = process.env.APP_URL || '';
@@ -783,22 +978,24 @@ jobs:
             const issue_number = context.issue.number;
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
 
-            // A smoke failure fails the deploy job, so DEPLOY_RESULT is not
+            // A smoke failure fails the trusted auth job, so AUTH_RESULT is not
             // 'success' even though the app deployed. Detect "smoke ran and did
             // not pass" from its outputs (which persist even though the step
             // exited non-zero) so the developer sees the real smoke reason
             // instead of a generic "did not complete". Healthy is reported ONLY
-            // when deploy succeeded AND smoke passed.
+            // when deploy and authentication succeeded AND smoke passed.
             const smokeRan = process.env.SMOKE_PASSED === 'true'
               || process.env.SMOKE_PASSED === 'false';
             let health;
-            if (deployOk && smokePassed) {
+            if (deployOk && authOk && smokePassed) {
               health = '✅ Healthy — `/health/live` and `/health/ready` passed';
             } else if (smokeRan && !smokePassed) {
               const detail = process.env.SMOKE_MESSAGE || 'smoke test did not pass';
               health = `⚠️ Smoke test failed — ${detail}`;
             } else {
-              health = '❌ Deployment did not complete';
+              health = deployOk
+                ? '❌ Trusted authentication configuration did not complete'
+                : '❌ Deployment did not complete';
             }
 
             const appLine = appUrl

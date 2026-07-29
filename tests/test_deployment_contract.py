@@ -424,7 +424,7 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn(
             "environmentResourceId: privateContainerAppsEnvironment.id", private_app
         )
-        self.assertIn("ingressExternal: true", private_app)
+        self.assertIn("ingressExternal: applicationExternalIngress", private_app)
         self.assertIn("privateLinkServiceId: storageAccountResource.id", private_endpoint)
         self.assertIn("'blob'", private_endpoint)
         self.assertIn("privateDnsZone.outputs.resourceId", private_endpoint)
@@ -507,7 +507,7 @@ class DeploymentContractTests(unittest.TestCase):
         for contract in (
             "workloadProfileName: containerAppsWorkloadProfileName",
             "ingressAllowInsecure: false",
-            "ingressExternal: true",
+            "ingressExternal: false",
             "ingressTargetPort: 8000",
             "path: '/health/live'",
             "path: '/health/ready'",
@@ -537,8 +537,33 @@ class DeploymentContractTests(unittest.TestCase):
             "AZURE_STORAGE_ACCOUNT_URL",
             "FANTASY_CARD_BLOB_CONTAINER",
             "APPLICATIONINSIGHTS_CONNECTION_STRING",
+            "AZURE_TENANT_ID",
+            "FANTASY_CARD_OIDC_CLIENT_ID",
+            "FANTASY_CARD_APPLICATION_BASE_URL",
         ):
             self.assertRegex(app, rf"name:\s*'{name}'\s+value:\s*\S+")
+        for name, secret_ref in (
+            ("FANTASY_CARD_OIDC_CLIENT_SECRET", "oidc-client-secret"),
+            ("FANTASY_CARD_SESSION_SECRET_CURRENT", "session-secret-current"),
+            ("FANTASY_CARD_SESSION_SECRET_PREVIOUS", "session-secret-previous"),
+        ):
+            self.assertRegex(
+                app,
+                rf"name:\s*'{name}'\s+secretRef:\s*'{secret_ref}'",
+            )
+        private_app = extract_bicep_block(
+            self.web_bicep, "module", "privateContainerApp"
+        )
+        self.assertIn("ingressExternal: applicationExternalIngress", private_app)
+        for name in (
+            "FANTASY_CARD_OIDC_CLIENT_ID",
+            "FANTASY_CARD_OIDC_CLIENT_SECRET",
+            "FANTASY_CARD_SESSION_SECRET_CURRENT",
+            "FANTASY_CARD_SESSION_SECRET_PREVIOUS",
+        ):
+            self.assertIn(f"name: '{name}'", private_app)
+        self.assertNotIn("AUTH_MODE", self.web_bicep)
+        self.assertNotIn("local-anonymous", self.web_bicep)
 
     def test_diagnostics_budget_and_alerts_match_emitted_telemetry_contract(self) -> None:
         for resource in (

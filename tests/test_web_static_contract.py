@@ -1,8 +1,11 @@
 import os
 import re
+from hashlib import sha256
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+
+from itsdangerous import URLSafeTimedSerializer
 
 
 def _contrast_ratio(foreground: str, background: str) -> float:
@@ -25,6 +28,8 @@ def _contrast_ratio(foreground: str, background: str) -> float:
 
 
 class WebStaticContractTests(unittest.TestCase):
+    session_secret = "s" * 48
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -32,7 +37,25 @@ class WebStaticContractTests(unittest.TestCase):
             "FANTASY_CARD_IMAGE_GENERATOR": "in-memory",
             "FANTASY_CARD_ARTIFACT_STORE": "filesystem",
             "FANTASY_CARD_OUTPUT_DIR": self.output_directory.name,
+            "AZURE_TENANT_ID": "11111111-1111-4111-8111-111111111111",
+            "FANTASY_CARD_OIDC_CLIENT_ID": "22222222-2222-4222-8222-222222222222",
+            "FANTASY_CARD_OIDC_CLIENT_SECRET": "test-client-credential",
+            "FANTASY_CARD_APPLICATION_BASE_URL": "http://localhost:8000",
+            "FANTASY_CARD_SESSION_SECRET_CURRENT": self.session_secret,
         }
+
+    def authenticate(self, client: object) -> None:
+        serializer = URLSafeTimedSerializer(
+            self.session_secret,
+            salt="fantasy-cards-session-v1",
+            signer_kwargs={"digest_method": sha256},
+        )
+        client.cookies.set(
+            "fantasy-cards-session",
+            serializer.dumps(
+                {"owner_subject": "owner-a", "csrf_token": "csrf-token"}
+            ),
+        )
 
     def test_html_exposes_landmarks_constraints_and_repository_owned_assets(self) -> None:
         from fastapi.testclient import TestClient
@@ -40,6 +63,7 @@ class WebStaticContractTests(unittest.TestCase):
 
         with patch.dict(os.environ, self.environment, clear=True):
             with TestClient(create_app()) as client:
+                self.authenticate(client)
                 response = client.get("/")
 
         html = response.text
@@ -68,6 +92,7 @@ class WebStaticContractTests(unittest.TestCase):
 
         with patch.dict(os.environ, self.environment, clear=True):
             with TestClient(create_app()) as client:
+                self.authenticate(client)
                 html = client.get("/").text
                 stylesheet_path = re.search(
                     r'href="(?P<path>/static/[^"]+\.css)"', html
@@ -93,6 +118,7 @@ class WebStaticContractTests(unittest.TestCase):
 
         with patch.dict(os.environ, self.environment, clear=True):
             with TestClient(create_app()) as client:
+                self.authenticate(client)
                 html = client.get("/").text
                 stylesheet_path = re.search(
                     r'href="(?P<path>/static/[^"]+\.css)"', html
@@ -155,6 +181,7 @@ class WebStaticContractTests(unittest.TestCase):
 
         with patch.dict(os.environ, self.environment, clear=True):
             with TestClient(create_app()) as client:
+                self.authenticate(client)
                 html = client.get("/").text
                 script_path = re.search(
                     r'src="(?P<path>/static/[^"]+\.js)"', html

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
+from secrets import compare_digest, token_urlsafe
 from threading import BoundedSemaphore, Lock
 from time import monotonic
 from typing import Any
@@ -14,7 +15,7 @@ from uuid import UUID, uuid4
 
 from anyio import to_thread
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -24,6 +25,14 @@ from fantasy_cards.adapters import (
     ImageGenerationError,
     deterministic_idempotency_key,
 )
+from fantasy_cards.auth import (
+    AUTH_FAILURES,
+    AuthenticationConfigurationError,
+    AuthlibOidcClient,
+    AuthSettings,
+    OidcClient,
+    SignedSessionMiddleware,
+)
 from fantasy_cards.config import (
     ConfigurationError,
     ImageGeneratorSettings,
@@ -31,7 +40,11 @@ from fantasy_cards.config import (
     WebSettings,
     build_web_application,
 )
-from fantasy_cards.domain import CardGenerationRequest, GenerationJob
+from fantasy_cards.domain import (
+    CardGenerationRequest,
+    GenerationJob,
+    is_valid_owner_subject,
+)
 from fantasy_cards.telemetry import (
     configure_telemetry,
     record_generation_outcome,
@@ -142,10 +155,14 @@ class WebRuntime:
         self,
         application: WebApplication | None,
         settings: WebSettings | None,
+        auth_settings: AuthSettings | None,
+        oidc_client: OidcClient | None,
         configuration_error: bool,
     ) -> None:
         self.application = application
         self.settings = settings
+        self.auth_settings = auth_settings
+        self.oidc_client = oidc_client
         self.configuration_error = configuration_error
         self.generation_slot = BoundedSemaphore(1)
         self.rate_limiter = RollingRateLimiter(
@@ -158,21 +175,33 @@ def create_app(
     application: WebApplication | None = None,
     image_settings: ImageGeneratorSettings | None = None,
     web_settings: WebSettings | None = None,
+    auth_settings: AuthSettings | None = None,
+    oidc_client: OidcClient | None = None,
 ) -> FastAPI:
     configuration_error = False
     try:
         resolved_web_settings = (web_settings or WebSettings.from_environment()).validated()
+        resolved_auth_settings = (
+            auth_settings or AuthSettings.from_environment()
+        ).validated()
         resolved_application = application or build_web_application(
             image_settings=image_settings,
             web_settings=resolved_web_settings,
         )
-    except (ConfigurationError, ValueError):
+        resolved_oidc_client = oidc_client or AuthlibOidcClient(resolved_auth_settings)
+    except (AuthenticationConfigurationError, ConfigurationError, ValueError):
         resolved_web_settings = None
+        resolved_auth_settings = None
         resolved_application = None
+        resolved_oidc_client = None
         configuration_error = True
 
     runtime = WebRuntime(
-        resolved_application, resolved_web_settings, configuration_error
+        resolved_application,
+        resolved_web_settings,
+        resolved_auth_settings,
+        resolved_oidc_client,
+        configuration_error,
     )
     templates = Environment(
         loader=FileSystemLoader(_PACKAGE_DIRECTORY / "templates"),
@@ -187,6 +216,10 @@ def create_app(
     application_host.state.runtime = runtime
     application_host.state.templates = templates
     application_host.add_middleware(RequestBoundaryMiddleware)
+    if resolved_auth_settings is not None:
+        application_host.add_middleware(
+            SignedSessionMiddleware, settings=resolved_auth_settings
+        )
     application_host.mount(
         "/static",
         StaticFiles(directory=_PACKAGE_DIRECTORY / "static"),
@@ -194,12 +227,52 @@ def create_app(
     )
 
     @application_host.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
+    async def index(request: Request) -> Response:
+        if _owner_subject(request) is None:
+            return RedirectResponse("/auth/login", status_code=302)
         return _render(request, title="", description="", result=None, error=None)
+
+    @application_host.get("/auth/login")
+    async def login(request: Request) -> Response:
+        if _owner_subject(request) is not None:
+            return RedirectResponse("/", status_code=302)
+        if runtime.oidc_client is None:
+            return _json_error(
+                "configuration_error", request.state.correlation_id, 503
+            )
+        return await runtime.oidc_client.authorize_redirect(request)
+
+    @application_host.get("/auth/callback")
+    async def auth_callback(request: Request) -> Response:
+        if runtime.oidc_client is None:
+            return _json_error(
+                "configuration_error", request.state.correlation_id, 503
+            )
+        try:
+            owner_subject = await runtime.oidc_client.authenticate(request)
+        except AUTH_FAILURES:
+            request.session.clear()
+            return _json_error("authentication_failed", request.state.correlation_id, 400)
+        request.session.clear()
+        request.session["owner_subject"] = owner_subject
+        request.session["csrf_token"] = token_urlsafe(32)
+        return RedirectResponse("/", status_code=302)
+
+    @application_host.post("/auth/logout")
+    async def logout(request: Request) -> Response:
+        if _owner_subject(request) is None or not _valid_csrf(
+            request, request.headers.get("X-CSRF-Token")
+        ):
+            return _json_error("authentication_required", request.state.correlation_id, 401)
+        request.session.clear()
+        return RedirectResponse("/auth/login", status_code=303)
 
     @application_host.post("/generations", response_class=HTMLResponse)
     async def form_generation(request: Request) -> HTMLResponse:
         correlation_id = request.state.correlation_id
+        owner_subject = _owner_subject(request)
+        if owner_subject is None:
+            return _render_error(request, "authentication_required", 401)
         if not _matches_content_type(request, "application/x-www-form-urlencoded"):
             return _render(
                 request,
@@ -211,12 +284,20 @@ def create_app(
             )
         try:
             fields = parse_qs((await request.body()).decode("utf-8"), keep_blank_values=True)
+            csrf_values = fields.get("csrf_token", [])
+            supplied_csrf = request.headers.get("X-CSRF-Token")
+            if supplied_csrf is None and len(csrf_values) == 1:
+                supplied_csrf = csrf_values[0]
+            if not _valid_csrf(request, supplied_csrf):
+                raise WebError("authentication_required", 401)
             payload: Mapping[str, Any] = {
                 "title": _single_field(fields, "title"),
                 "description": _single_field(fields, "description"),
             }
             generation_input = _validated_input(payload, None)
-            job = await _generate(runtime, generation_input, correlation_id)
+            job = await _generate(
+                runtime, generation_input, correlation_id, owner_subject
+            )
         except UnicodeDecodeError:
             return _render_error(request, "invalid_request", 422)
         except WebError as error:
@@ -243,6 +324,11 @@ def create_app(
     @application_host.post("/api/generations")
     async def api_generation(request: Request) -> JSONResponse:
         correlation_id = request.state.correlation_id
+        owner_subject = _owner_subject(request)
+        if owner_subject is None or not _valid_csrf(
+            request, request.headers.get("X-CSRF-Token")
+        ):
+            return _json_error("authentication_required", correlation_id, 401)
         if not _matches_content_type(request, "application/json"):
             return _json_error("unsupported_media_type", correlation_id, 415)
         try:
@@ -250,7 +336,9 @@ def create_app(
             generation_input = _validated_input(
                 payload, request.headers.get("Idempotency-Key")
             )
-            job = await _generate(runtime, generation_input, correlation_id)
+            job = await _generate(
+                runtime, generation_input, correlation_id, owner_subject
+            )
         except (json.JSONDecodeError, UnicodeDecodeError):
             return _json_error("invalid_request", correlation_id, 422)
         except WebError as error:
@@ -264,11 +352,18 @@ def create_app(
 
     @application_host.get("/api/artifacts/{artifact_id}")
     async def artifact(artifact_id: str, request: Request) -> Response:
-        if not _canonical_uuid(artifact_id) or runtime.application is None:
+        owner_subject = _owner_subject(request)
+        if (
+            owner_subject is None
+            or not _canonical_uuid(artifact_id)
+            or runtime.application is None
+        ):
             return _json_error("artifact_unavailable", request.state.correlation_id, 404)
         try:
             artifact_content = await to_thread.run_sync(
-                runtime.application.artifact_reader.read, artifact_id
+                runtime.application.artifact_reader.read,
+                artifact_id,
+                owner_subject,
             )
         except (ArtifactNotFoundError, KeyError):
             return _json_error("artifact_unavailable", request.state.correlation_id, 404)
@@ -289,7 +384,7 @@ def create_app(
             media_type="image/png",
             headers={
                 "Content-Length": str(artifact_content.size_bytes),
-                "Cache-Control": "private, max-age=3600",
+                "Cache-Control": "private, no-store",
             },
         )
 
@@ -315,7 +410,10 @@ class WebError(Exception):
 
 
 async def _generate(
-    runtime: WebRuntime, generation_input: GenerationInput, correlation_id: str
+    runtime: WebRuntime,
+    generation_input: GenerationInput,
+    correlation_id: str,
+    owner_subject: str,
 ) -> GenerationJob:
     if runtime.configuration_error or runtime.application is None:
         raise WebError("configuration_error", 503)
@@ -332,6 +430,7 @@ async def _generate(
             prompt=generation_input.description,
             correlation_id=correlation_id,
             idempotency_key=generation_input.idempotency_key,
+            owner_subject=owner_subject,
         )
         job = await to_thread.run_sync(runtime.application.service.generate, request)
         _log_outcome(
@@ -384,6 +483,28 @@ def _single_field(fields: Mapping[str, list[str]], name: str) -> str:
     if len(values) != 1:
         raise WebError("invalid_request", 422)
     return values[0]
+
+
+def _owner_subject(request: Request) -> str | None:
+    session = request.scope.get("session")
+    if not isinstance(session, Mapping):
+        return None
+    owner_subject = session.get("owner_subject")
+    if not is_valid_owner_subject(owner_subject):
+        return None
+    return str(owner_subject)
+
+
+def _valid_csrf(request: Request, supplied_token: str | None) -> bool:
+    session = request.scope.get("session")
+    if not isinstance(session, Mapping) or not isinstance(supplied_token, str):
+        return False
+    expected_token = session.get("csrf_token")
+    return (
+        isinstance(expected_token, str)
+        and bool(expected_token)
+        and compare_digest(expected_token, supplied_token)
+    )
 
 
 def _job_dto(job: GenerationJob, correlation_id: str) -> dict[str, Any]:
@@ -469,6 +590,7 @@ def _render(
             description=description,
             result=result,
             error=error,
+            csrf_token=request.session.get("csrf_token", ""),
         ),
         status_code=status_code,
     )
@@ -487,6 +609,7 @@ def _message(code: str) -> str:
         "artifact_unavailable": "The requested card image is unavailable.",
         "configuration_error": "Card generation is not configured.",
         "generation_failed": "The card could not be generated.",
+        "authentication_required": "Sign in to continue.",
     }.get(code, "The request could not be completed.")
 
 

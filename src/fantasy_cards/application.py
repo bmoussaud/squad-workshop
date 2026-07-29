@@ -19,13 +19,15 @@ class GenerationService:
 
     def generate(self, request: CardGenerationRequest) -> GenerationJob:
         existing_job = self._job_repository.get_by_idempotency_key(
-            request.idempotency_key
+            request.owner_subject, request.idempotency_key
         )
         if existing_job is not None:
             return existing_job
 
         image = self._image_generator.generate(request.title, request.prompt)
-        artifact = self._artifact_store.save(image.content, image.media_type)
+        artifact = self._artifact_store.save(
+            image.content, image.media_type, request.owner_subject
+        )
         job = GenerationJob(
             job_id=str(uuid4()),
             correlation_id=request.correlation_id,

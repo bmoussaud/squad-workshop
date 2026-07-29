@@ -28,6 +28,7 @@ def main() -> int:
         correlation_id=arguments.correlation_id or str(uuid4()),
         idempotency_key=arguments.idempotency_key
         or deterministic_idempotency_key(arguments.title, arguments.prompt),
+        owner_subject="local-cli",
     )
     try:
         job = build_local_application().service.generate(request)

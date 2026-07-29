@@ -6,6 +6,9 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "pr-environment.yml"
 JANITOR_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "pr-environment-janitor.yml"
+TEARDOWN_WORKFLOW = (
+    REPOSITORY_ROOT / ".github" / "workflows" / "pr-environment-teardown.yml"
+)
 
 
 def _step_block(source: str, step_name: str) -> str:
@@ -18,11 +21,22 @@ def _step_block(source: str, step_name: str) -> str:
     return match.group("body")
 
 
+def _job_block(source: str, job_name: str) -> str:
+    pattern = re.compile(
+        rf"(?ms)^  {re.escape(job_name)}:\n(?P<body>.*?)(?=^  [a-zA-Z_]+:|\Z)"
+    )
+    match = pattern.search(source)
+    if match is None:
+        raise AssertionError(f"Missing workflow job {job_name!r}")
+    return match.group("body")
+
+
 class PrEnvironmentWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.janitor_workflow = JANITOR_WORKFLOW.read_text(encoding="utf-8")
+        cls.teardown_workflow = TEARDOWN_WORKFLOW.read_text(encoding="utf-8")
 
     def test_preflight_policy_blocks_are_printed_before_enforcement(self) -> None:
         block = _step_block(self.workflow, "Evaluate deploy preflight")
@@ -108,6 +122,75 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
             self.workflow.index("Create and atomically tag PR resource group"),
             self.workflow.index("- name: azd provision"),
         )
+
+    def test_pr_oidc_registration_runs_on_fresh_trusted_runner(self) -> None:
+        deploy = _job_block(self.workflow, "deploy")
+        configure = _job_block(self.workflow, "configure_auth")
+        self.assertNotIn("ENTRA_AUTOMATION_CREDENTIALS", deploy)
+        self.assertNotIn("graph.microsoft.com", deploy)
+        self.assertIn("runs-on: ubuntu-latest", configure)
+        self.assertIn(
+            "ref: ${{ github.event.pull_request.base.sha }}\n"
+            "          persist-credentials: false",
+            configure,
+        )
+        self.assertNotIn("github.event.pull_request.head.sha", configure)
+        self.assertIn("secrets.ENTRA_AUTOMATION_CREDENTIALS", configure)
+
+        create = _step_block(self.workflow, "Create or rotate the PR OIDC application")
+        self.assertIn("OIDC_MARKER", create)
+        self.assertIn("OIDC_TAG", create)
+        self.assertIn("graph.microsoft.com/v1.0/servicePrincipals", create)
+        self.assertIn("/addPassword", create)
+        self.assertIn('echo "::add-mask::$client_secret"', create)
+        self.assertIn('echo "::add-mask::$session_current"', create)
+        self.assertIn("PR_OIDC_CLIENT_SECRET=${client_secret}", create)
+        self.assertIn('${APP_URL}/auth/callback', create)
+        self.assertNotIn("local-anonymous", self.workflow)
+        self.assertNotIn("FANTASY_CARD_AUTH_MODE", self.workflow)
+        directory_login = _step_block(self.workflow, "Directory automation login")
+        self.assertIn("secrets.ENTRA_AUTOMATION_CREDENTIALS", directory_login)
+        self.assertNotIn("id-token", directory_login)
+        self.assertLess(
+            self.workflow.index("- name: Clear directory automation session"),
+            self.workflow.index("- name: Azure resource login", self.workflow.index("configure_auth:")),
+        )
+        self.assertIn("Remove superseded PR OIDC credentials", self.workflow)
+
+        configure_runtime = _step_block(
+            self.workflow,
+            "Install trusted authentication configuration and open ingress",
+        )
+        self.assertIn("az containerapp secret set", configure_runtime)
+        self.assertIn("az containerapp ingress enable", configure_runtime)
+        self.assertLess(
+            configure_runtime.index("az containerapp secret set"),
+            configure_runtime.index("az containerapp ingress enable"),
+        )
+
+    def test_pr_app_is_provisioned_closed_before_trusted_auth_configuration(
+        self,
+    ) -> None:
+        inputs = _step_block(
+            self.workflow, "Configure shared bindings and required infra inputs"
+        )
+        self.assertIn("FANTASY_CARD_EXTERNAL_INGRESS=false", inputs)
+        self.assertIn("provisioning-placeholder-only", inputs)
+        configure_index = self.workflow.index("  configure_auth:")
+        self.assertLess(
+            self.workflow.index("- name: azd provision"),
+            configure_index,
+        )
+
+    def test_teardown_deletes_only_the_marked_pr_oidc_registration(self) -> None:
+        delete = _step_block(
+            self.teardown_workflow, "Delete the isolated PR OIDC application"
+        )
+        self.assertIn("squad-workshop-pr-${PR_NUMBER}", delete)
+        self.assertIn("squad-workshop-pr-auth", delete)
+        self.assertIn("graph.microsoft.com/v1.0/applications", delete)
+        self.assertIn("graph.microsoft.com/v1.0/servicePrincipals", delete)
+        self.assertIn("--method DELETE", delete)
 
     def test_janitor_requires_explicit_opt_in_for_untagged_orphan_deletion(self) -> None:
         self.assertIn("default: true", self.janitor_workflow)

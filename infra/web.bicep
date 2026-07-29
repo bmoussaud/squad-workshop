@@ -27,6 +27,15 @@ param monthlyBudgetAmount int
 param budgetStartDate string
 param alertContactEmails array
 param enableApplicationSignalAlerts bool
+param oidcTenantId string
+param oidcClientId string
+@secure()
+param oidcClientSecret string
+@secure()
+param sessionSecretCurrent string
+@secure()
+param sessionSecretPrevious string
+param applicationExternalIngress bool
 
 @description('Precomputed Container App resource name from the Phase 1 naming module (CONTAINER_APP_NAME). Empty falls back to the dev-derived ca-fantasy-cards-<environmentName>, which overflows the 32-char Container App limit for long PR environment names; PR environments MUST supply this.')
 param containerAppName string = ''
@@ -66,6 +75,24 @@ var containerAppsWorkloadProfile = workloadProfileType == 'Consumption' ? {
 	workloadProfileType: workloadProfileType
 	minimumCount: workloadProfileMinimumCount
 	maximumCount: workloadProfileMaximumCount
+}
+var publicApplicationBaseUrl = 'https://${containerAppNameEffective}.${containerAppsEnvironment.properties.defaultDomain}'
+var privateApplicationBaseUrl = 'https://${privateContainerAppName}.${privateContainerAppsEnvironment.properties.defaultDomain}'
+var applicationSecrets = {
+	secureList: [
+		{
+			name: 'oidc-client-secret'
+			value: oidcClientSecret
+		}
+		{
+			name: 'session-secret-current'
+			value: sessionSecretCurrent
+		}
+		{
+			name: 'session-secret-previous'
+			value: sessionSecretPrevious
+		}
+	]
 }
 
 resource applicationInsights 'Microsoft.Insights/components@2020-02-02' existing = {
@@ -330,7 +357,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 		workloadProfileName: containerAppsWorkloadProfileName
 		activeRevisionsMode: 'Single'
 		ingressAllowInsecure: false
-		ingressExternal: true
+		ingressExternal: false
 		ingressTargetPort: 8000
 		ingressTransport: 'auto'
 		registries: [
@@ -396,6 +423,30 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 							name: 'FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS'
 							value: '600'
 						}
+						{
+							name: 'AZURE_TENANT_ID'
+							value: oidcTenantId
+						}
+						{
+							name: 'FANTASY_CARD_OIDC_CLIENT_ID'
+							value: oidcClientId
+						}
+						{
+							name: 'FANTASY_CARD_OIDC_CLIENT_SECRET'
+							secretRef: 'oidc-client-secret'
+						}
+						{
+							name: 'FANTASY_CARD_APPLICATION_BASE_URL'
+							value: publicApplicationBaseUrl
+						}
+						{
+							name: 'FANTASY_CARD_SESSION_SECRET_CURRENT'
+							secretRef: 'session-secret-current'
+						}
+						{
+							name: 'FANTASY_CARD_SESSION_SECRET_PREVIOUS'
+							secretRef: 'session-secret-previous'
+						}
 					]
 					resources: {
 						cpu: json(containerCpu)
@@ -441,6 +492,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 						}
 					}
 		]
+		secrets: applicationSecrets
 	}
 	
 }
@@ -462,7 +514,7 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 		workloadProfileName: containerAppsWorkloadProfileName
 		activeRevisionsMode: 'Single'
 		ingressAllowInsecure: false
-		ingressExternal: true
+		ingressExternal: applicationExternalIngress
 		ingressTargetPort: 8000
 		ingressTransport: 'auto'
 		registries: [
@@ -528,6 +580,30 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 						name: 'FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS'
 						value: '600'
 					}
+					{
+						name: 'AZURE_TENANT_ID'
+						value: oidcTenantId
+					}
+					{
+						name: 'FANTASY_CARD_OIDC_CLIENT_ID'
+						value: oidcClientId
+					}
+					{
+						name: 'FANTASY_CARD_OIDC_CLIENT_SECRET'
+						secretRef: 'oidc-client-secret'
+					}
+					{
+						name: 'FANTASY_CARD_APPLICATION_BASE_URL'
+						value: privateApplicationBaseUrl
+					}
+					{
+						name: 'FANTASY_CARD_SESSION_SECRET_CURRENT'
+						secretRef: 'session-secret-current'
+					}
+					{
+						name: 'FANTASY_CARD_SESSION_SECRET_PREVIOUS'
+						secretRef: 'session-secret-previous'
+					}
 				]
 				resources: {
 					cpu: json(containerCpu)
@@ -573,6 +649,7 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 				}
 			}
 		]
+		secrets: applicationSecrets
 	}
 }
 

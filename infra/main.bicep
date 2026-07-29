@@ -95,6 +95,27 @@ param alertContactEmails array
 @description('Enable application-signal log alerts only after Azure Validate confirms telemetry tables and queries.')
 param enableApplicationSignalAlerts bool = false
 
+@description('Single Entra tenant used by the in-application OIDC flow.')
+param oidcTenantId string
+
+@description('Entra application client identifier used by the in-application OIDC flow.')
+param oidcClientId string
+
+@secure()
+@description('Entra application client credential stored only as a Container App secret.')
+param oidcClientSecret string
+
+@secure()
+@description('Current application session signing key.')
+param sessionSecretCurrent string
+
+@secure()
+@description('Previous application session signing key accepted during rotation.')
+param sessionSecretPrevious string
+
+@description('Expose the primary application ingress. PR provisioning keeps this disabled until trusted authentication configuration completes.')
+param applicationExternalIngress bool = true
+
 @description('Precomputed Container App resource name (Phase 1 naming module, CONTAINER_APP_NAME). Empty keeps the dev-derived name; PR environments supply an Azure-limit-safe name.')
 param containerAppName string = ''
 
@@ -200,6 +221,12 @@ module web 'web.bicep' = {
     budgetStartDate: budgetStartDate
     alertContactEmails: alertContactEmails
     enableApplicationSignalAlerts: enableApplicationSignalAlerts
+    oidcTenantId: oidcTenantId
+    oidcClientId: oidcClientId
+    oidcClientSecret: oidcClientSecret
+    sessionSecretCurrent: sessionSecretCurrent
+    sessionSecretPrevious: sessionSecretPrevious
+    applicationExternalIngress: applicationExternalIngress
   }
 }
 

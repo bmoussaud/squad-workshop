@@ -2,6 +2,14 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+import re
+
+
+_OWNER_SUBJECT_PATTERN = re.compile(r"[A-Za-z0-9._~-]{1,255}")
+
+
+def is_valid_owner_subject(value: object) -> bool:
+    return isinstance(value, str) and _OWNER_SUBJECT_PATTERN.fullmatch(value) is not None
 
 
 class JobStatus(StrEnum):
@@ -14,11 +22,20 @@ class CardGenerationRequest:
     prompt: str
     correlation_id: str
     idempotency_key: str
+    owner_subject: str
 
     def __post_init__(self) -> None:
-        for field_name in ("title", "prompt", "correlation_id", "idempotency_key"):
+        for field_name in (
+            "title",
+            "prompt",
+            "correlation_id",
+            "idempotency_key",
+            "owner_subject",
+        ):
             if not getattr(self, field_name).strip():
                 raise ValueError(f"{field_name} must not be blank")
+        if not is_valid_owner_subject(self.owner_subject):
+            raise ValueError("owner_subject is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +51,7 @@ class Artifact:
     media_type: str
     size_bytes: int
     file_path: str
+    owner_subject: str
 
 
 @dataclass(frozen=True, slots=True, eq=False)

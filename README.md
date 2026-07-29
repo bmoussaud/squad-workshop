@@ -83,6 +83,21 @@ Set `AZURE_OPENAI_ENDPOINT` to the exact inference endpoint for the resource tha
 
 The runtime identity needs the **Cognitive Services OpenAI User** role on the Azure OpenAI resource. Local development can use an authenticated Azure CLI session. In Azure, `DefaultAzureCredential` automatically uses managed identity; set `AZURE_CLIENT_ID` when selecting a user-assigned managed identity. Endpoints, deployment names, and credentials remain runtime configuration and must not be committed.
 
+### Run the authenticated web application locally
+
+The web application requires a single-tenant Entra app registration with the exact redirect URI `http://localhost:8000/auth/callback`. Configure its tenant ID, client ID, client credential, application base URL, and current/previous session signing keys through these runtime variables:
+
+```text
+AZURE_TENANT_ID
+FANTASY_CARD_OIDC_CLIENT_ID
+FANTASY_CARD_OIDC_CLIENT_SECRET
+FANTASY_CARD_APPLICATION_BASE_URL
+FANTASY_CARD_SESSION_SECRET_CURRENT
+FANTASY_CARD_SESSION_SECRET_PREVIOUS
+```
+
+Session signing keys must contain at least 32 characters. Generate and store all credentials outside Git, then start the web process with `uv run python -m fantasy_cards`. Generation and artifact routes require an authenticated session; health probes remain anonymous. Artifacts are streamed through the application and can be read only by the Entra `sub` that created them.
+
 Run the tests with:
 
 ```bash
