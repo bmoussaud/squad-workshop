@@ -43,6 +43,8 @@ class ImageGeneratorSettings:
     mode: str = "in-memory"
     endpoint: str | None = None
     deployment: str | None = None
+    rai_policy_name: str | None = None
+    rai_policy_version: str | None = None
     timeout_seconds: float = 60.0
 
     @classmethod
@@ -61,6 +63,8 @@ class ImageGeneratorSettings:
             mode=values.get("FANTASY_CARD_IMAGE_GENERATOR", "in-memory"),
             endpoint=values.get("AZURE_OPENAI_ENDPOINT"),
             deployment=values.get("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            rai_policy_name=values.get("FANTASY_CARD_RAI_POLICY_NAME"),
+            rai_policy_version=values.get("FANTASY_CARD_RAI_POLICY_VERSION"),
             timeout_seconds=timeout_seconds,
         ).validated()
 
@@ -78,9 +82,13 @@ class ImageGeneratorSettings:
             or not self.endpoint.strip()
             or not self.deployment
             or not self.deployment.strip()
+            or not self.rai_policy_name
+            or not self.rai_policy_name.strip()
+            or not self.rai_policy_version
+            or not self.rai_policy_version.strip()
         ):
             raise ConfigurationError(
-                "Foundry image generation configuration is incomplete."
+                "Foundry image generation and RAI policy configuration is incomplete."
             )
         if self.mode == "foundry":
             try:

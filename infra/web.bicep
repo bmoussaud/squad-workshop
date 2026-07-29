@@ -18,6 +18,8 @@ param applicationInsightsResourceId string
 param logAnalyticsWorkspaceResourceId string
 param openAiEndpoint string
 param modelDeploymentName string
+param raiPolicyName string
+param raiPolicyVersion string
 param workloadProfileType string
 param workloadProfileMinimumCount int
 param workloadProfileMaximumCount int
@@ -357,6 +359,14 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 							value: modelDeploymentName
 						}
 						{
+							name: 'FANTASY_CARD_RAI_POLICY_NAME'
+							value: raiPolicyName
+						}
+						{
+							name: 'FANTASY_CARD_RAI_POLICY_VERSION'
+							value: raiPolicyVersion
+						}
+						{
 							name: 'AZURE_CLIENT_ID'
 							value: applicationIdentityClientId
 						}
@@ -487,6 +497,14 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 					{
 						name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
 						value: modelDeploymentName
+					}
+					{
+						name: 'FANTASY_CARD_RAI_POLICY_NAME'
+						value: raiPolicyName
+					}
+					{
+						name: 'FANTASY_CARD_RAI_POLICY_VERSION'
+						value: raiPolicyVersion
 					}
 					{
 						name: 'AZURE_CLIENT_ID'

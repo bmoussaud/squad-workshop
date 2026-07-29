@@ -191,6 +191,8 @@ module web 'web.bicep' = {
     logAnalyticsWorkspaceResourceId: foundry.outputs.logAnalyticsWorkspaceResourceId
     openAiEndpoint: foundry.outputs.openAiEndpoint
     modelDeploymentName: modelDeploymentName
+    raiPolicyName: foundry.outputs.raiPolicyName
+    raiPolicyVersion: foundry.outputs.raiPolicyVersion
     workloadProfileType: workloadProfileType
     workloadProfileMinimumCount: workloadProfileMinimumCount
     workloadProfileMaximumCount: workloadProfileMaximumCount

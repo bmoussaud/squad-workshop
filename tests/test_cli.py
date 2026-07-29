@@ -79,6 +79,8 @@ class CliTests(unittest.TestCase):
                 "FANTASY_CARD_IMAGE_GENERATOR": "foundry",
                 "AZURE_OPENAI_ENDPOINT": "https://cards.openai.azure.com",
                 "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-image-2-deployment",
+                "FANTASY_CARD_RAI_POLICY_NAME": "fantasy-cards-content-policy-v1",
+                "FANTASY_CARD_RAI_POLICY_VERSION": "1",
                 "FANTASY_CARD_IMAGE_TIMEOUT_SECONDS": "45",
                 "FANTASY_CARD_OUTPUT_DIR": output_directory,
             },
@@ -170,6 +172,8 @@ class CliTests(unittest.TestCase):
                 "https://example.services.ai.azure.com/openai/v1"
             ),
             "AZURE_OPENAI_DEPLOYMENT_NAME": "image-deployment",
+            "FANTASY_CARD_RAI_POLICY_NAME": "fantasy-cards-content-policy-v1",
+            "FANTASY_CARD_RAI_POLICY_VERSION": "1",
         }
 
         with patch.dict("os.environ", environment, clear=True), patch(

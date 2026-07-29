@@ -79,6 +79,12 @@ The CLI loads `.env` with `python-dotenv`. Existing shell variables take precede
 
 `FANTASY_CARD_IMAGE_TIMEOUT_SECONDS` is optional and must be between 1 and 120 seconds. The client does not automatically retry image generation because a retry can duplicate provider charges.
 
+Foundry mode also requires the non-secret deployed policy identity
+`FANTASY_CARD_RAI_POLICY_NAME=fantasy-cards-content-policy-v1` and
+`FANTASY_CARD_RAI_POLICY_VERSION=1`. Production release evidence must verify
+the matching RAI policy is bound to the target deployment; local configuration
+does not itself prove the live binding.
+
 Set `AZURE_OPENAI_ENDPOINT` to the exact inference endpoint for the resource that owns the named deployment. The application accepts valid `*.services.ai.azure.com/openai/v1` and `*.openai.azure.com/openai/v1` endpoint families, but it does not translate one hostname family into the other. An endpoint and deployment from different resources can produce `500 Unable to get resource information` from the service.
 
 The runtime identity needs the **Cognitive Services OpenAI User** role on the Azure OpenAI resource. Local development can use an authenticated Azure CLI session. In Azure, `DefaultAzureCredential` automatically uses managed identity; set `AZURE_CLIENT_ID` when selecting a user-assigned managed identity. Endpoints, deployment names, and credentials remain runtime configuration and must not be committed.
