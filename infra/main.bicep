@@ -63,6 +63,12 @@ param modelSkuName string
 @minValue(1)
 @description('Deployment capacity. Revalidate quota and live capacity immediately before provisioning.')
 param modelCapacity int = 1
+@description('Application-owned content policy identifier compiled into the runtime.')
+param contentPolicyId string
+@description('Application-owned content policy version compiled into the runtime.')
+param contentPolicyVersion string
+@description('Versioned custom Foundry RAI policy name expected on the model deployment.')
+param raiPolicyName string
 
 @description('Azure Container Apps workload profile type. Use Consumption for scale-to-zero PR environments; dedicated SKUs require validated capacity bounds.')
 param workloadProfileType string
@@ -167,6 +173,7 @@ module foundry 'foundry.bicep' = {
     modelVersion: modelVersion
     modelSkuName: modelSkuName
     modelCapacity: modelCapacity
+    raiPolicyName: raiPolicyName
   }
 }
 
@@ -191,6 +198,10 @@ module web 'web.bicep' = {
     logAnalyticsWorkspaceResourceId: foundry.outputs.logAnalyticsWorkspaceResourceId
     openAiEndpoint: foundry.outputs.openAiEndpoint
     modelDeploymentName: modelDeploymentName
+    contentPolicyId: contentPolicyId
+    contentPolicyVersion: contentPolicyVersion
+    raiPolicyName: raiPolicyName
+    boundRaiPolicyName: foundry.outputs.boundRaiPolicyName
     workloadProfileType: workloadProfileType
     workloadProfileMinimumCount: workloadProfileMinimumCount
     workloadProfileMaximumCount: workloadProfileMaximumCount
@@ -206,10 +217,15 @@ module web 'web.bicep' = {
 output AZURE_LOCATION string = location
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output AZURE_AI_ACCOUNT_NAME string = foundry.outputs.accountName
+output AZURE_AI_ACCOUNT_RESOURCE_GROUP string = foundry.outputs.accountResourceGroupName
 output AZURE_AI_PROJECT_NAME string = foundry.outputs.projectName
 output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output AZURE_OPENAI_ENDPOINT string = foundry.outputs.openAiEndpoint
 output AZURE_OPENAI_DEPLOYMENT_NAME string = modelDeploymentName
+output FANTASY_CARD_CONTENT_POLICY_ID string = contentPolicyId
+output FANTASY_CARD_CONTENT_POLICY_VERSION string = contentPolicyVersion
+output FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME string = raiPolicyName
+output FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME string = foundry.outputs.boundRaiPolicyName
 output AZURE_CLIENT_ID string = foundry.outputs.applicationIdentityClientId
 @secure()
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = foundry.outputs.applicationInsightsConnectionString

@@ -22,6 +22,14 @@ The deploy workflow also references GitHub Environment
 job is an approval checkpoint only; it does **not** request `id-token: write` and
 does not need a second Entra federated credential.
 
+The optional `validate:live-foundry` job runs under `azure-pr-app`, requests
+OIDC, and reads the target Foundry account, deployment, and RAI policy. It needs
+`Microsoft.CognitiveServices/accounts/read`,
+`Microsoft.CognitiveServices/accounts/deployments/read`, and
+`Microsoft.CognitiveServices/accounts/raiPolicies/read` on the target account
+or resource group. Without those permissions, the job must fail and no live
+binding claim may be made.
+
 ## 1. Entra app registration + federated credential
 
 - App registration display name: `squad-workshop-pr-envs`

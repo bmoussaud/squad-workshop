@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from uuid import UUID
 
 from fantasy_cards.adapters import (
     BlobArtifactStore,
@@ -17,6 +18,11 @@ from fantasy_cards.adapters import (
     normalize_azure_openai_endpoint,
 )
 from fantasy_cards.application import GenerationService
+from fantasy_cards.policy import (
+    CONTENT_POLICY_ID,
+    CONTENT_POLICY_VERSION,
+    FOUNDRY_RAI_POLICY_NAME,
+)
 from fantasy_cards.ports import ArtifactReader, ArtifactStore
 
 
@@ -43,6 +49,11 @@ class ImageGeneratorSettings:
     mode: str = "in-memory"
     endpoint: str | None = None
     deployment: str | None = None
+    managed_identity_client_id: str | None = None
+    content_policy_id: str | None = None
+    content_policy_version: str | None = None
+    rai_policy_name: str | None = None
+    bound_rai_policy_name: str | None = None
     timeout_seconds: float = 60.0
 
     @classmethod
@@ -61,6 +72,13 @@ class ImageGeneratorSettings:
             mode=values.get("FANTASY_CARD_IMAGE_GENERATOR", "in-memory"),
             endpoint=values.get("AZURE_OPENAI_ENDPOINT"),
             deployment=values.get("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            managed_identity_client_id=values.get("AZURE_CLIENT_ID"),
+            content_policy_id=values.get("FANTASY_CARD_CONTENT_POLICY_ID"),
+            content_policy_version=values.get("FANTASY_CARD_CONTENT_POLICY_VERSION"),
+            rai_policy_name=values.get("FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME"),
+            bound_rai_policy_name=values.get(
+                "FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME"
+            ),
             timeout_seconds=timeout_seconds,
         ).validated()
 
@@ -73,11 +91,17 @@ class ImageGeneratorSettings:
             raise ConfigurationError(
                 "Image generation timeout must be between 1 and 120 seconds."
             )
-        if self.mode == "foundry" and (
-            not self.endpoint
-            or not self.endpoint.strip()
-            or not self.deployment
-            or not self.deployment.strip()
+        if self.mode == "foundry" and any(
+            not value or not value.strip()
+            for value in (
+                self.endpoint,
+                self.deployment,
+                self.managed_identity_client_id,
+                self.content_policy_id,
+                self.content_policy_version,
+                self.rai_policy_name,
+                self.bound_rai_policy_name,
+            )
         ):
             raise ConfigurationError(
                 "Foundry image generation configuration is incomplete."
@@ -89,6 +113,25 @@ class ImageGeneratorSettings:
                 raise ConfigurationError(
                     "Azure OpenAI endpoint is invalid."
                 ) from None
+            try:
+                client_id = str(UUID(self.managed_identity_client_id or ""))
+            except ValueError:
+                raise ConfigurationError(
+                    "Foundry runtime identity configuration is invalid."
+                ) from None
+            if client_id != self.managed_identity_client_id:
+                raise ConfigurationError(
+                    "Foundry runtime identity configuration is invalid."
+                )
+            if (
+                self.content_policy_id != CONTENT_POLICY_ID
+                or self.content_policy_version != CONTENT_POLICY_VERSION
+                or self.rai_policy_name != FOUNDRY_RAI_POLICY_NAME
+                or self.bound_rai_policy_name != FOUNDRY_RAI_POLICY_NAME
+            ):
+                raise ConfigurationError(
+                    "Foundry content policy attestation does not match this runtime."
+                )
         return self
 
 
@@ -165,6 +208,7 @@ def build_local_application(
             endpoint=settings.endpoint or "",
             deployment=settings.deployment or "",
             timeout_seconds=settings.timeout_seconds,
+            managed_identity_client_id=settings.managed_identity_client_id or "",
             client_factory=client_factory,
         )
     else:
@@ -210,6 +254,8 @@ def build_web_application(
             endpoint=image_settings.endpoint or "",
             deployment=image_settings.deployment or "",
             timeout_seconds=image_settings.timeout_seconds,
+            managed_identity_client_id=image_settings.managed_identity_client_id
+            or "",
             client_factory=client_factory,
         )
     else:

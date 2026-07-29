@@ -18,6 +18,10 @@ param applicationInsightsResourceId string
 param logAnalyticsWorkspaceResourceId string
 param openAiEndpoint string
 param modelDeploymentName string
+param contentPolicyId string
+param contentPolicyVersion string
+param raiPolicyName string
+param boundRaiPolicyName string
 param workloadProfileType string
 param workloadProfileMinimumCount int
 param workloadProfileMaximumCount int
@@ -361,6 +365,22 @@ module containerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 							value: applicationIdentityClientId
 						}
 						{
+							name: 'FANTASY_CARD_CONTENT_POLICY_ID'
+							value: contentPolicyId
+						}
+						{
+							name: 'FANTASY_CARD_CONTENT_POLICY_VERSION'
+							value: contentPolicyVersion
+						}
+						{
+							name: 'FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME'
+							value: raiPolicyName
+						}
+						{
+							name: 'FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME'
+							value: boundRaiPolicyName
+						}
+						{
 							name: 'FANTASY_CARD_IMAGE_TIMEOUT_SECONDS'
 							value: '120'
 						}
@@ -491,6 +511,22 @@ module privateContainerApp 'br/public:avm/res/app/container-app:0.9.0' = {
 					{
 						name: 'AZURE_CLIENT_ID'
 						value: applicationIdentityClientId
+					}
+					{
+						name: 'FANTASY_CARD_CONTENT_POLICY_ID'
+						value: contentPolicyId
+					}
+					{
+						name: 'FANTASY_CARD_CONTENT_POLICY_VERSION'
+						value: contentPolicyVersion
+					}
+					{
+						name: 'FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME'
+						value: raiPolicyName
+					}
+					{
+						name: 'FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME'
+						value: boundRaiPolicyName
 					}
 					{
 						name: 'FANTASY_CARD_IMAGE_TIMEOUT_SECONDS'

@@ -27,7 +27,7 @@ class GenerationServiceTests(unittest.TestCase):
     def test_generates_and_persists_a_job_with_operation_ids(self) -> None:
         request = CardGenerationRequest(
             title="Ember Sentinel",
-            prompt="A knight made of living flame",
+            prompt="adult original fantasy knight made of living flame",
             correlation_id="corr-123",
             idempotency_key="idem-123",
         )
@@ -44,19 +44,29 @@ class GenerationServiceTests(unittest.TestCase):
         self.assertIn(job.artifact.artifact_id, artifact_path.name)
         self.assertEqual(
             artifact_path.read_bytes(),
-            b"generated card for: Ember Sentinel | A knight made of living flame",
+            b"generated card for: Ember Sentinel | adult original fantasy knight made of living flame",
         )
         self.assertEqual(
             self.artifact_store.read(job.artifact.artifact_id),
-            b"generated card for: Ember Sentinel | A knight made of living flame",
+            b"generated card for: Ember Sentinel | adult original fantasy knight made of living flame",
         )
         self.assertIs(
             self.job_repository.get_by_idempotency_key("idem-123"), job
         )
 
     def test_reuses_the_existing_job_for_an_idempotency_key(self) -> None:
-        first_request = CardGenerationRequest("A", "first", "corr-1", "same")
-        second_request = CardGenerationRequest("B", "second", "corr-2", "same")
+        first_request = CardGenerationRequest(
+            "Ember Sentinel",
+            "adult original fantasy knight made of living flame",
+            "corr-1",
+            "same",
+        )
+        second_request = CardGenerationRequest(
+            "Frost Warden",
+            "adult original fantasy ranger with silver armor",
+            "corr-2",
+            "same",
+        )
 
         first_job = self.service.generate(first_request)
         second_job = self.service.generate(second_request)

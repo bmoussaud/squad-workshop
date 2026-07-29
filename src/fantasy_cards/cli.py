@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from fantasy_cards.adapters import ImageGenerationError, deterministic_idempotency_key
 from fantasy_cards.config import ConfigurationError, build_local_application
 from fantasy_cards.domain import CardGenerationRequest
+from fantasy_cards.policy import ContentPolicyError, validate_content_policy
 
 
 def main() -> int:
@@ -22,16 +23,17 @@ def main() -> int:
     parser.add_argument("--idempotency-key", default=None)
     arguments = parser.parse_args()
 
-    request = CardGenerationRequest(
-        title=arguments.title,
-        prompt=arguments.prompt,
-        correlation_id=arguments.correlation_id or str(uuid4()),
-        idempotency_key=arguments.idempotency_key
-        or deterministic_idempotency_key(arguments.title, arguments.prompt),
-    )
     try:
+        validate_content_policy(arguments.title, arguments.prompt)
+        request = CardGenerationRequest(
+            title=arguments.title,
+            prompt=arguments.prompt,
+            correlation_id=arguments.correlation_id or str(uuid4()),
+            idempotency_key=arguments.idempotency_key
+            or deterministic_idempotency_key(arguments.title, arguments.prompt),
+        )
         job = build_local_application().service.generate(request)
-    except (ConfigurationError, ImageGenerationError) as error:
+    except (ConfigurationError, ContentPolicyError, ImageGenerationError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
     print(json.dumps(asdict(job), indent=2))

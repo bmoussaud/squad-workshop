@@ -270,7 +270,12 @@ class DeploymentContractTests(unittest.TestCase):
                 "FANTASY_CARD_BLOB_CONTAINER",
                 "AZURE_OPENAI_ENDPOINT",
                 "AZURE_OPENAI_DEPLOYMENT_NAME",
+                "AZURE_AI_ACCOUNT_RESOURCE_GROUP",
                 "AZURE_CLIENT_ID",
+                "FANTASY_CARD_CONTENT_POLICY_ID",
+                "FANTASY_CARD_CONTENT_POLICY_VERSION",
+                "FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME",
+                "FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME",
                 "APPLICATIONINSIGHTS_CONNECTION_STRING",
             }.issubset(outputs)
         )
@@ -279,6 +284,33 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertRegex(
             self.foundry_bicep,
             r"(?m)^@secure\(\)\s*\noutput applicationInsightsConnectionString string\b",
+        )
+
+    def test_versioned_rai_policy_is_created_before_and_bound_to_deployment(self) -> None:
+        account = extract_bicep_block(self.foundry_bicep, "module", "foundryAccount")
+        policy = extract_bicep_block(self.foundry_bicep, "resource", "raiPolicy")
+        deployment = extract_bicep_block(
+            self.foundry_bicep, "resource", "modelDeployment"
+        )
+        shared_module = (
+            REPOSITORY_ROOT / "infra/modules/shared-foundry-rbac.bicep"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("deployments:", account)
+        self.assertIn("basePolicyName: 'Microsoft.DefaultV2'", policy)
+        self.assertIn("mode: 'Blocking'", policy)
+        self.assertIn("raiPolicyName: raiPolicy.name", deployment)
+        self.assertIn("versionUpgradeOption: 'NoAutoUpgrade'", deployment)
+        self.assertIn(
+            "output boundRaiPolicyName string = deployFoundry ? "
+            "modelDeployment!.properties.raiPolicyName : "
+            "sharedFoundryRbac!.outputs.boundRaiPolicyName",
+            self.foundry_bicep,
+        )
+        self.assertIn(
+            "output boundRaiPolicyName string = "
+            "sharedModelDeployment.properties.raiPolicyName",
+            shared_module,
         )
         self.assertRegex(
             self.main_bicep,
@@ -534,6 +566,10 @@ class DeploymentContractTests(unittest.TestCase):
             "AZURE_OPENAI_ENDPOINT",
             "AZURE_OPENAI_DEPLOYMENT_NAME",
             "AZURE_CLIENT_ID",
+            "FANTASY_CARD_CONTENT_POLICY_ID",
+            "FANTASY_CARD_CONTENT_POLICY_VERSION",
+            "FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME",
+            "FANTASY_CARD_FOUNDRY_BOUND_RAI_POLICY_NAME",
             "AZURE_STORAGE_ACCOUNT_URL",
             "FANTASY_CARD_BLOB_CONTAINER",
             "APPLICATIONINSIGHTS_CONNECTION_STRING",

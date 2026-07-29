@@ -32,6 +32,13 @@ from fantasy_cards.config import (
     build_web_application,
 )
 from fantasy_cards.domain import CardGenerationRequest, GenerationJob
+from fantasy_cards.policy import (
+    CONTENT_POLICY_ID,
+    CONTENT_POLICY_REFUSAL,
+    CONTENT_POLICY_VERSION,
+    ContentPolicyError,
+    validate_content_policy,
+)
 from fantasy_cards.telemetry import (
     configure_telemetry,
     record_generation_outcome,
@@ -220,12 +227,22 @@ def create_app(
         except UnicodeDecodeError:
             return _render_error(request, "invalid_request", 422)
         except WebError as error:
+            if error.code == "content_policy_rejected":
+                _log_outcome(correlation_id, error.code, 0.0)
             return _render_error(
                 request,
                 error.code,
                 error.status_code,
-                title=locals().get("payload", {}).get("title", ""),
-                description=locals().get("payload", {}).get("description", ""),
+                title=(
+                    ""
+                    if error.code == "content_policy_rejected"
+                    else locals().get("payload", {}).get("title", "")
+                ),
+                description=(
+                    ""
+                    if error.code == "content_policy_rejected"
+                    else locals().get("payload", {}).get("description", "")
+                ),
                 retry_after=error.retry_after,
             )
         return _render(
@@ -254,6 +271,8 @@ def create_app(
         except (json.JSONDecodeError, UnicodeDecodeError):
             return _json_error("invalid_request", correlation_id, 422)
         except WebError as error:
+            if error.code == "content_policy_rejected":
+                _log_outcome(correlation_id, error.code, 0.0)
             return _json_error(
                 error.code,
                 correlation_id,
@@ -344,6 +363,9 @@ async def _generate(
     except ImageGenerationError as error:
         _log_outcome(correlation_id, error.code, monotonic() - started_at)
         raise _image_error(error.code) from None
+    except ContentPolicyError:
+        _log_outcome(correlation_id, "content_policy_rejected", monotonic() - started_at)
+        raise WebError("content_policy_rejected", 422) from None
     except ArtifactStorageError:
         _log_outcome(correlation_id, "artifact_unavailable", monotonic() - started_at)
         raise WebError("artifact_unavailable", 503) from None
@@ -363,15 +385,22 @@ def _validated_input(payload: Any, idempotency_key: str | None) -> GenerationInp
     description = payload["description"]
     if not isinstance(title, str) or not isinstance(description, str):
         raise WebError("invalid_request", 422)
-    title = title.strip()
-    description = description.strip()
-    if not 1 <= len(title) <= 80 or not 1 <= len(description) <= 1000:
+    if (
+        not title.strip()
+        or not description.strip()
+        or not 1 <= len(title) <= 80
+        or not 1 <= len(description) <= 1000
+    ):
         raise WebError("invalid_request", 422)
     if idempotency_key is not None and (
         not 1 <= len(idempotency_key) <= 128
         or any(ord(character) < 32 or ord(character) > 126 for character in idempotency_key)
     ):
         raise WebError("invalid_request", 422)
+    try:
+        validate_content_policy(title, description)
+    except ContentPolicyError:
+        raise WebError("content_policy_rejected", 422) from None
     return GenerationInput(
         title,
         description,
@@ -482,6 +511,7 @@ def _message(code: str) -> str:
         "rate_limited": "Too many generation attempts. Please try again later.",
         "busy": "A card is already being generated. Please try again shortly.",
         "safety_rejected": "This description could not be generated. Revise it and try again.",
+        "content_policy_rejected": CONTENT_POLICY_REFUSAL,
         "provider_timeout": "Card generation took too long. Please try again.",
         "provider_unavailable": "Card generation is temporarily unavailable.",
         "artifact_unavailable": "The requested card image is unavailable.",
@@ -517,6 +547,10 @@ def _log_outcome(
     elif outcome == "artifact_unavailable":
         event["dependency"] = "blob"
         event["error_code"] = outcome
+    elif outcome == "content_policy_rejected":
+        event["error_code"] = outcome
+        event["policy_id"] = CONTENT_POLICY_ID
+        event["policy_version"] = CONTENT_POLICY_VERSION
     elif outcome != "succeeded":
         event["error_code"] = outcome
     if size_bytes is not None:
@@ -555,6 +589,8 @@ def _emit_structured_event(event: dict[str, str | int | float | bool]) -> None:
             "error_code",
             "operation",
             "outcome",
+            "policy_id",
+            "policy_version",
             "size_bytes",
             "success",
         )

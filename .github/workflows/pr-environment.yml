@@ -235,6 +235,10 @@ jobs:
       smoke_passed: ${{ steps.smoke.outputs.passed }}
       smoke_message: ${{ steps.smoke.outputs.message }}
       expires_at: ${{ steps.tags.outputs.expires_at }}
+      foundry_account_name: ${{ steps.foundry-binding.outputs.account_name }}
+      foundry_account_resource_group: ${{ steps.foundry-binding.outputs.account_resource_group }}
+      model_deployment_name: ${{ steps.foundry-binding.outputs.model_deployment_name }}
+      rai_policy_name: ${{ steps.foundry-binding.outputs.rai_policy_name }}
     env:
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -552,6 +556,17 @@ jobs:
       - name: azd provision
         run: azd provision --no-prompt
 
+      - name: Resolve Foundry binding attestation outputs
+        id: foundry-binding
+        run: |
+          set -euo pipefail
+          {
+            echo "account_name=$(azd env get-value AZURE_AI_ACCOUNT_NAME)"
+            echo "account_resource_group=$(azd env get-value AZURE_AI_ACCOUNT_RESOURCE_GROUP)"
+            echo "model_deployment_name=$(azd env get-value AZURE_OPENAI_DEPLOYMENT_NAME)"
+            echo "rai_policy_name=$(azd env get-value FANTASY_CARD_FOUNDRY_RAI_POLICY_NAME)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Tag PR resource group (ephemeral + TTL)
         id: tags
         env:
@@ -649,12 +664,76 @@ jobs:
       needs.preflight.outputs.live_validation_requested == 'true' &&
       needs.deploy.result == 'success'
     runs-on: ubuntu-latest
+    environment: azure-pr-app
     permissions:
       contents: read
+      id-token: write
     outputs:
       result: ${{ steps.validate.outputs.result }}
       correlation_id: ${{ steps.validate.outputs.correlation_id }}
     steps:
+      - name: Azure CLI login for read-only binding evidence
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify live versioned RAI policy binding
+        id: binding
+        env:
+          FOUNDRY_ACCOUNT_NAME: ${{ needs.deploy.outputs.foundry_account_name }}
+          FOUNDRY_RESOURCE_GROUP: ${{ needs.deploy.outputs.foundry_account_resource_group }}
+          MODEL_DEPLOYMENT_NAME: ${{ needs.deploy.outputs.model_deployment_name }}
+          RAI_POLICY_NAME: ${{ needs.deploy.outputs.rai_policy_name }}
+        run: |
+          set -euo pipefail
+          account_id="$(az cognitiveservices account show \
+            --name "$FOUNDRY_ACCOUNT_NAME" \
+            --resource-group "$FOUNDRY_RESOURCE_GROUP" \
+            --query id -o tsv)"
+          az cognitiveservices account deployment show \
+            --name "$FOUNDRY_ACCOUNT_NAME" \
+            --resource-group "$FOUNDRY_RESOURCE_GROUP" \
+            --deployment-name "$MODEL_DEPLOYMENT_NAME" \
+            --output json > "$RUNNER_TEMP/foundry-deployment.json"
+          az resource show \
+            --ids "${account_id}/raiPolicies/${RAI_POLICY_NAME}" \
+            --api-version 2024-10-01 \
+            --output json > "$RUNNER_TEMP/foundry-rai-policy.json"
+          python3 - "$RUNNER_TEMP/foundry-deployment.json" \
+            "$RUNNER_TEMP/foundry-rai-policy.json" "$RAI_POLICY_NAME" \
+            "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          deployment = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          policy = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          expected = sys.argv[3]
+          output = Path(sys.argv[4])
+          deployment_properties = deployment.get("properties", {})
+          policy_properties = policy.get("properties", {})
+          policy_name = str(policy.get("name", "")).rsplit("/", 1)[-1]
+          verified = (
+              bool(expected)
+              and deployment_properties.get("raiPolicyName") == expected
+              and policy_name == expected
+              and policy_properties.get("basePolicyName") == "Microsoft.DefaultV2"
+              and policy_properties.get("mode") == "Blocking"
+          )
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write(f"verified={str(verified).lower()}\n")
+              if verified:
+                  stream.write(f"policy_name={expected}\n")
+                  stream.write("base_policy=Microsoft.DefaultV2\n")
+                  stream.write("mode=Blocking\n")
+              else:
+                  stream.write("error=Foundry RAI binding verification failed.\n")
+          if not verified:
+              raise SystemExit(2)
+          PY
+
       - name: Exercise sanitized gpt-image-2 card-generation path
         id: validate
         env:
@@ -671,8 +750,8 @@ jobs:
           app_url = os.environ["APP_URL"].rstrip("/")
           correlation_id = f"live-foundry-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
           payload = {
-              "title": "Live validation",
-              "description": "A safe non-branded fantasy character portrait for infrastructure validation.",
+            "title": "Ember Sentinel",
+            "description": "adult original fantasy knight made of living flame",
           }
 
           def record(result: str) -> None:

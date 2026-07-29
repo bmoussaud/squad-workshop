@@ -9,6 +9,8 @@ from unittest.mock import patch
 from uuid import UUID
 
 MAX_REQUEST_BYTES = 16 * 1024
+SAFE_TITLE = "Ember Sentinel"
+SAFE_DESCRIPTION = "adult original fantasy knight made of living flame"
 
 
 def assert_canonical_uuid(test_case: unittest.TestCase, value: str) -> None:
@@ -99,6 +101,12 @@ class WebAcceptanceTests(unittest.TestCase):
             "opt-out or self-service deletion option.",
             html,
         )
+        self.assertIn(
+            "Requests for real people, protected characters or brands, named artists, "
+            "minors, or words outside the supported original-fantasy vocabulary are "
+            "refused before provider access.",
+            html,
+        )
 
     def test_invalid_configuration_is_not_ready_without_credential_discovery(self) -> None:
         invalid_environment = {
@@ -127,8 +135,8 @@ class WebAcceptanceTests(unittest.TestCase):
                 response = client.post(
                     "/api/generations",
                     json={
-                        "title": " Ember Sentinel ",
-                        "description": " A knight made of living flame ",
+                        "title": SAFE_TITLE,
+                        "description": SAFE_DESCRIPTION,
                     },
                     headers={
                         "Idempotency-Key": "acceptance-json-success",
@@ -192,7 +200,7 @@ class WebAcceptanceTests(unittest.TestCase):
                     "/generations",
                     data={
                         "title": "Ember Sentinel",
-                        "description": "A knight made of living flame",
+                        "description": SAFE_DESCRIPTION,
                     },
                 )
 
@@ -205,13 +213,14 @@ class WebAcceptanceTests(unittest.TestCase):
             response.text,
             r'alt="[^"]*Ember Sentinel[^"]*"',
         )
-        self.assertIn(">A knight made of living flame</textarea>", response.text)
+        self.assertIn(f">{SAFE_DESCRIPTION}</textarea>", response.text)
 
-    def test_exact_field_bounds_are_accepted_and_excess_is_rejected(self) -> None:
-        accepted = (
-            {"title": "x", "description": "y"},
-            {"title": "x" * 80, "description": "y" * 1000},
-        )
+    def test_field_limits_precede_fail_closed_policy(self) -> None:
+        accepted = ({"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},)
+        policy_rejected = {
+            "title": ("ancient " * 9) + "guardian",
+            "description": "adult original fantasy knight " + ("a " * 483) + "a",
+        }
         rejected = (
             {"title": " ", "description": "valid"},
             {"title": "x" * 81, "description": "valid"},
@@ -230,6 +239,16 @@ class WebAcceptanceTests(unittest.TestCase):
                         headers={"Idempotency-Key": f"accepted-{index}"},
                     )
                 self.assertEqual(response.status_code, 200, response.text)
+
+        with patch.dict(os.environ, self.environment, clear=True):
+            with self.create_client() as client:
+                response = client.post(
+                    "/api/generations",
+                    json=policy_rejected,
+                    headers={"Idempotency-Key": "policy-rejected-boundary"},
+                )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assert_error_envelope(response, "content_policy_rejected")
 
         for index, payload in enumerate(rejected):
             with self.subTest(rejected=index), patch.dict(
@@ -255,7 +274,7 @@ class WebAcceptanceTests(unittest.TestCase):
                 with self.create_client() as client:
                     response = client.post(
                         "/api/generations",
-                        json={"title": "Title", "description": "Description"},
+                        json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                         headers={"Idempotency-Key": key},
                     )
                 self.assertEqual(response.status_code, 200, response.text)
@@ -267,11 +286,75 @@ class WebAcceptanceTests(unittest.TestCase):
                 with self.create_client() as client:
                     response = client.post(
                         "/api/generations",
-                        json={"title": "Title", "description": "Description"},
+                        json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                         headers={"Idempotency-Key": key},
                     )
                 self.assertEqual(response.status_code, 422, response.text)
                 self.assert_error_envelope(response, "invalid_request")
+
+    def test_policy_refusal_has_web_parity_and_precedes_idempotency_and_provider(self) -> None:
+        rejected_title = "Unknown Person"
+        rejected_description = "Barack Obama as Batman in banksy style age 12"
+        with patch.dict(os.environ, self.environment, clear=True), patch(
+            "fantasy_cards.web.deterministic_idempotency_key"
+        ) as idempotency, patch(
+            "fantasy_cards.adapters.LocalPngImageGenerator.generate"
+        ) as generate, patch(
+            "fantasy_cards.web._LOGGER.info"
+        ) as info:
+            with self.create_client() as client:
+                api_response = client.post(
+                    "/api/generations",
+                    json={
+                        "title": rejected_title,
+                        "description": rejected_description,
+                    },
+                )
+                form_response = client.post(
+                    "/generations",
+                    data={
+                        "title": rejected_title,
+                        "description": rejected_description,
+                    },
+                )
+
+        for response in (api_response, form_response):
+            with self.subTest(content_type=response.headers["content-type"]):
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertNotIn(rejected_title, response.text)
+                self.assertNotIn(rejected_description, response.text)
+        self.assert_error_envelope(api_response, "content_policy_rejected")
+        self.assertIn(
+            "This request can&#39;t be used to create an image.",
+            form_response.text,
+        )
+        idempotency.assert_not_called()
+        generate.assert_not_called()
+        self.assertEqual(info.call_count, 2)
+        for call in info.call_args_list:
+            self.assertNotIn(rejected_title, call.args[0])
+            self.assertNotIn(rejected_description, call.args[0])
+            event = json.loads(call.args[0])
+            self.assertEqual(event["outcome"], "content_policy_rejected")
+            self.assertEqual(event["policy_id"], "original-fantasy-closed-v1")
+            self.assertEqual(event["policy_version"], "1")
+
+        for whitespace in ("\u00a0", "\u2003"):
+            with self.subTest(whitespace=repr(whitespace)), patch.dict(
+                os.environ, self.environment, clear=True
+            ):
+                with self.create_client() as client:
+                    response = client.post(
+                        "/api/generations",
+                        json={
+                            "title": SAFE_TITLE,
+                            "description": (
+                                f"{whitespace}{SAFE_DESCRIPTION}{whitespace}"
+                            ),
+                        },
+                    )
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assert_error_envelope(response, "content_policy_rejected")
 
     def test_request_size_limit_and_content_type_precede_generation(self) -> None:
         cases = (
@@ -324,7 +407,7 @@ class WebAcceptanceTests(unittest.TestCase):
                 with self.create_client() as client:
                     response = client.post(
                         "/api/generations",
-                        json={"title": "Title", "description": private_detail},
+                        json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                         headers={"X-Correlation-ID": "invalid-private-value"},
                     )
                 self.assertEqual(response.status_code, status, response.text)
@@ -375,7 +458,7 @@ class WebAcceptanceTests(unittest.TestCase):
             with TestClient(create_app(application=application)) as client:
                 response = client.post(
                     "/api/generations",
-                    json={"title": "Ember Sentinel", "description": "A safe prompt"},
+                    json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                 )
 
         self.assertEqual(response.status_code, 503, response.text)
@@ -391,7 +474,7 @@ class WebAcceptanceTests(unittest.TestCase):
 
     def test_successful_generation_logs_safe_completion_metadata(self) -> None:
         correlation_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-        private_description = "A knight with an unpublished private backstory"
+        private_description = SAFE_DESCRIPTION
 
         with patch.dict(os.environ, self.environment, clear=True), patch(
             "fantasy_cards.web._LOGGER.info"
@@ -399,7 +482,7 @@ class WebAcceptanceTests(unittest.TestCase):
             with self.create_client() as client:
                 response = client.post(
                     "/api/generations",
-                    json={"title": "Ember Sentinel", "description": private_description},
+                    json={"title": SAFE_TITLE, "description": private_description},
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
@@ -437,7 +520,7 @@ class WebAcceptanceTests(unittest.TestCase):
             with self.create_client() as client:
                 response = client.post(
                     "/api/generations",
-                    json={"title": "Title", "description": private_detail},
+                    json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                     headers={"X-Correlation-ID": correlation_id},
                 )
 
@@ -470,14 +553,14 @@ class WebAcceptanceTests(unittest.TestCase):
                 for attempt in range(10):
                     response = client.post(
                         "/api/generations",
-                        json={"title": f"Card {attempt}", "description": "Description"},
+                        json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                         headers={"Idempotency-Key": f"rate-{attempt}"},
                     )
                     self.assertEqual(response.status_code, 200, response.text)
 
                 rejected = client.post(
                     "/api/generations",
-                    json={"title": "Card 11", "description": "Description"},
+                    json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                     headers={"Idempotency-Key": "rate-11"},
                 )
 
@@ -506,7 +589,7 @@ class WebAcceptanceTests(unittest.TestCase):
                     target=lambda: first_response.append(
                         client.post(
                             "/api/generations",
-                            json={"title": "First", "description": "Description"},
+                            json={"title": SAFE_TITLE, "description": SAFE_DESCRIPTION},
                             headers={"Idempotency-Key": "busy-first"},
                         )
                     )
@@ -515,7 +598,7 @@ class WebAcceptanceTests(unittest.TestCase):
                 self.assertTrue(started.wait(timeout=2))
                 second = client.post(
                     "/api/generations",
-                    json={"title": "Second", "description": "Description"},
+                    json={"title": "Frost Warden", "description": SAFE_DESCRIPTION},
                     headers={"Idempotency-Key": "busy-second"},
                 )
                 release.set()

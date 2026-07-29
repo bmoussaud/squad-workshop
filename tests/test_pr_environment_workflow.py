@@ -109,6 +109,42 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
             self.workflow.index("- name: azd provision"),
         )
 
+    def test_live_foundry_validation_is_explicitly_gated_and_verifies_binding(self) -> None:
+        live = re.search(
+            r"(?ms)^  live_foundry_validation:\n(?P<body>.*?)(?=^  [a-zA-Z_]+:|\Z)",
+            self.workflow,
+        )
+        self.assertIsNotNone(live)
+        assert live is not None
+        body = live.group("body")
+        self.assertIn(
+            "needs.preflight.outputs.live_validation_requested == 'true'", body
+        )
+        self.assertIn("environment: azure-pr-app", body)
+        self.assertIn("id-token: write", body)
+        self.assertIn("Azure CLI login for read-only binding evidence", body)
+        self.assertIn("Verify live versioned RAI policy binding", body)
+        self.assertIn("az cognitiveservices account deployment show", body)
+        self.assertNotIn("github.event.pull_request.head.sha", body)
+        self.assertNotIn("infra/scripts/verify_foundry_rai_binding.py", body)
+        self.assertIn(
+            'deployment_properties.get("raiPolicyName") == expected',
+            body,
+        )
+        self.assertIn(
+            'policy_properties.get("basePolicyName") == "Microsoft.DefaultV2"',
+            body,
+        )
+        self.assertIn('policy_properties.get("mode") == "Blocking"', body)
+        self.assertLess(
+            body.index("Verify live versioned RAI policy binding"),
+            body.index("Exercise sanitized gpt-image-2 card-generation path"),
+        )
+        self.assertIn(
+            '"description": "adult original fantasy knight made of living flame"',
+            body,
+        )
+
     def test_janitor_requires_explicit_opt_in_for_untagged_orphan_deletion(self) -> None:
         self.assertIn("default: true", self.janitor_workflow)
         self.assertIn("reap_untagged_orphans:", self.janitor_workflow)

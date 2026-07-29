@@ -51,7 +51,7 @@ class _ImagesClient(Protocol):
     images: Any
 
 
-FoundryClientFactory = Callable[[str, float], _ImagesClient]
+FoundryClientFactory = Callable[[str, float, str], _ImagesClient]
 
 _AZURE_OPENAI_RESOURCE_HOST = re.compile(
     r"^(?P<resource>[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.openai\.azure\.com$"
@@ -118,10 +118,12 @@ class FoundryImageGenerator:
         deployment: str,
         timeout_seconds: float,
         client_factory: FoundryClientFactory,
+        managed_identity_client_id: str = "",
     ) -> None:
         self._endpoint = endpoint
         self._deployment = deployment
         self._timeout_seconds = timeout_seconds
+        self._managed_identity_client_id = managed_identity_client_id
         self._client_factory = client_factory
         self._client: _ImagesClient | None = None
 
@@ -177,18 +179,27 @@ class FoundryImageGenerator:
     def _get_client(self) -> _ImagesClient:
         if self._client is None:
             self._client = self._client_factory(
-                self._endpoint, self._timeout_seconds
+                self._endpoint,
+                self._timeout_seconds,
+                self._managed_identity_client_id,
             )
         return self._client
 
 
-def create_foundry_client(endpoint: str, timeout_seconds: float) -> _ImagesClient:
+def create_foundry_client(
+    endpoint: str, timeout_seconds: float, managed_identity_client_id: str = ""
+) -> _ImagesClient:
     base_url = normalize_azure_openai_endpoint(endpoint)
     from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     from openai import OpenAI
 
+    credential_options = (
+        {"managed_identity_client_id": managed_identity_client_id}
+        if managed_identity_client_id
+        else {}
+    )
     token_provider = get_bearer_token_provider(
-        DefaultAzureCredential(), "https://ai.azure.com/.default"
+        DefaultAzureCredential(**credential_options), "https://ai.azure.com/.default"
     )
     return OpenAI(
         base_url=base_url,

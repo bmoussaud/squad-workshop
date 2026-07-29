@@ -51,7 +51,7 @@ The application requires Python 3.11 or newer. It uses the offline, in-memory im
 
 ```bash
 uv sync
-uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
+uv run fantasy-card "Ember Sentinel" "adult original fantasy knight made of living flame"
 ```
 
 The command prints a completed job record with correlation, idempotency, generator provenance, and artifact metadata. The in-memory generator creates a text demonstration artifact.
@@ -72,7 +72,7 @@ Foundry image generation is opt-in and uses Microsoft Entra authentication. Conf
 azd env get-values > .env
 printf '\nFANTASY_CARD_IMAGE_GENERATOR=foundry\n' >> .env
 azd auth login
-uv run fantasy-card "Ember Sentinel" "A knight made of living flame"
+uv run fantasy-card "Ember Sentinel" "adult original fantasy knight made of living flame"
 ```
 
 The CLI loads `.env` with `python-dotenv`. Existing shell variables take precedence, and `.env` is generated local state excluded from Git. Regenerate it after provisioning changes the `azd` outputs.
@@ -81,7 +81,9 @@ The CLI loads `.env` with `python-dotenv`. Existing shell variables take precede
 
 Set `AZURE_OPENAI_ENDPOINT` to the exact inference endpoint for the resource that owns the named deployment. The application accepts valid `*.services.ai.azure.com/openai/v1` and `*.openai.azure.com/openai/v1` endpoint families, but it does not translate one hostname family into the other. An endpoint and deployment from different resources can produce `500 Unable to get resource information` from the service.
 
-The runtime identity needs the **Cognitive Services OpenAI User** role on the Azure OpenAI resource. Local development can use an authenticated Azure CLI session. In Azure, `DefaultAzureCredential` automatically uses managed identity; set `AZURE_CLIENT_ID` when selecting a user-assigned managed identity. Endpoints, deployment names, and credentials remain runtime configuration and must not be committed.
+The runtime identity needs the **Cognitive Services OpenAI User** role on the Azure OpenAI resource. Foundry mode also requires the canonical user-assigned `AZURE_CLIENT_ID` and exact content-policy/RAI attestation outputs emitted by Bicep; missing or drifted values keep readiness closed. Local development can use an authenticated Azure CLI session while `DefaultAzureCredential` selects the configured managed-identity client ID. Endpoints, deployment names, and credentials remain runtime configuration and must not be committed.
+
+User-authored titles and descriptions are accepted only by content policy `original-fantasy-closed-v1`. Titles and descriptions must exactly match approved templates; arbitrary combinations of otherwise safe words are not accepted because they can form protected names. Unknown text, numbers, non-ASCII text, surrounding whitespace, and non-canonical Unicode are refused before idempotency or provider access.
 
 Run the tests with:
 

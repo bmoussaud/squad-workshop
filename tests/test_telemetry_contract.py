@@ -151,8 +151,8 @@ class TelemetryContractTests(unittest.TestCase):
         from fantasy_cards.adapters import ImageGenerationError
 
         correlation_id = "11111111-1111-4111-8111-111111111111"
-        private_title = "Private card title"
-        private_prompt = "Private prompt with bearer token and account endpoint"
+        private_title = "Ember Sentinel"
+        private_prompt = "adult original fantasy knight made of living flame"
         private_bytes = "89504e470d0a1a0a-private-image-bytes"
         configure = Mock(side_effect=AssertionError("telemetry must remain disabled"))
         instrument = Mock(side_effect=AssertionError("instrumentation must remain disabled"))

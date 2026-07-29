@@ -21,6 +21,8 @@ param modelName string
 param modelVersion string
 param modelSkuName string
 param modelCapacity int
+@description('Versioned custom RAI policy name bound to the model deployment.')
+param raiPolicyName string
 
 var resolvedSharedFoundryResourceGroupName = empty(sharedFoundryResourceGroupName) ? resourceGroup().name : sharedFoundryResourceGroupName
 // Built-in role definition ID for "Cognitive Services OpenAI User" (subscriptionResourceId is stable across regions/tenants).
@@ -93,21 +95,6 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = if
     publicNetworkAccess: 'Enabled'
     restrictOutboundNetworkAccess: false
     sku: 'S0'
-    deployments: [
-      {
-        name: modelDeploymentName
-        model: {
-          format: 'OpenAI'
-          name: modelName
-          version: modelVersion
-        }
-        sku: {
-          name: modelSkuName
-          capacity: modelCapacity
-        }
-        versionUpgradeOption: 'NoAutoUpgrade'
-      }
-    ]
     diagnosticSettings: [
       {
         name: 'send-to-${logAnalyticsWorkspaceName}'
@@ -136,6 +123,38 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = if
 
 resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = if (deployFoundry) {
   name: foundryAccountName
+}
+
+// native-bicep-fallback: The account AVM cannot order a custom RAI policy child before a model deployment that binds to it.
+resource raiPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10-01' = if (deployFoundry) {
+  parent: foundryAccountResource
+  name: raiPolicyName
+  properties: {
+    basePolicyName: 'Microsoft.DefaultV2'
+    mode: 'Blocking'
+  }
+  dependsOn: [
+    foundryAccount
+  ]
+}
+
+// native-bicep-fallback: The account AVM creates deployments inside its module and cannot depend on the separately versioned RAI policy child.
+resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = if (deployFoundry) {
+  parent: foundryAccountResource
+  name: modelDeploymentName
+  sku: {
+    name: modelSkuName
+    capacity: modelCapacity
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: modelName
+      version: modelVersion
+    }
+    raiPolicyName: raiPolicy.name
+    versionUpgradeOption: 'NoAutoUpgrade'
+  }
 }
 
 // native-bicep-fallback: The Cognitive Services account AVM does not create Foundry project child resources; the available Foundry pattern module replaces the approved user-assigned identity design with system-assigned identities.
@@ -172,13 +191,16 @@ module sharedFoundryRbac 'modules/shared-foundry-rbac.bicep' = if (!deployFoundr
     principalId: applicationIdentity.outputs.principalId
     roleDefinitionId: openAiUserRoleDefinitionId
     roleDescription: 'Allow this PR application identity to invoke the shared Microsoft Foundry OpenAI deployment.'
+    modelDeploymentName: modelDeploymentName
   }
 }
 
 output accountName string = deployFoundry ? foundryAccount.outputs.name : sharedFoundryAccountName
+output accountResourceGroupName string = deployFoundry ? resourceGroup().name : resolvedSharedFoundryResourceGroupName
 output projectName string = deployFoundry ? foundryProject.name : sharedFoundryProjectName
 output projectEndpoint string = 'https://${deployFoundry ? foundryAccount.outputs.name : sharedFoundryAccountName}.services.ai.azure.com/api/projects/${deployFoundry ? foundryProject.name : sharedFoundryProjectName}'
 output openAiEndpoint string = 'https://${deployFoundry ? foundryAccount.outputs.name : sharedFoundryAccountName}.services.ai.azure.com/openai/v1'
+output boundRaiPolicyName string = deployFoundry ? modelDeployment!.properties.raiPolicyName : sharedFoundryRbac!.outputs.boundRaiPolicyName
 output applicationIdentityClientId string = applicationIdentity.outputs.clientId
 output applicationIdentityPrincipalId string = applicationIdentity.outputs.principalId
 output applicationIdentityResourceId string = applicationIdentity.outputs.resourceId

@@ -18,6 +18,9 @@ from fantasy_cards.adapters import (
 )
 
 
+CLIENT_ID = "11111111-1111-4111-8111-111111111111"
+
+
 def valid_png() -> bytes:
     output = BytesIO()
     Image.new("RGB", (1, 1), "red").save(output, format="PNG")
@@ -38,11 +41,13 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         token_provider = token_provider_factory.return_value
 
         client = create_foundry_client(
-            "https://example.openai.azure.com/", 45.0
+            "https://example.openai.azure.com/", 45.0, CLIENT_ID
         )
 
         self.assertIs(client, openai_type.return_value)
-        credential_type.assert_called_once_with()
+        credential_type.assert_called_once_with(
+            managed_identity_client_id=CLIENT_ID
+        )
         token_provider_factory.assert_called_once_with(
             credential, "https://ai.azure.com/.default"
         )
@@ -78,6 +83,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         client = create_foundry_client(
             "https://foundry-j7hqwc4422gp4.services.ai.azure.com/openai/v1/",
             45.0,
+            CLIENT_ID,
         )
         client._client._transport = httpx.MockTransport(handle_request)
 
@@ -184,7 +190,7 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         self.assertEqual(image.media_type, "image/png")
         self.assertEqual(image.generator_name, "foundry")
         factory.assert_called_once_with(
-            "https://example.openai.azure.com", 60.0
+            "https://example.openai.azure.com", 60.0, ""
         )
         client.images.generate.assert_called_once_with(
             model="image-deployment",
