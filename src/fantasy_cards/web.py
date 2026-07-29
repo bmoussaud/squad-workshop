@@ -31,6 +31,7 @@ from fantasy_cards.config import (
     WebSettings,
     build_web_application,
 )
+from fantasy_cards.content_policy import ContentPolicyRejected
 from fantasy_cards.domain import CardGenerationRequest, GenerationJob
 from fantasy_cards.telemetry import (
     configure_telemetry,
@@ -341,6 +342,9 @@ async def _generate(
             job.artifact.size_bytes,
         )
         return job
+    except ContentPolicyRejected as error:
+        _log_outcome(correlation_id, error.code, monotonic() - started_at)
+        raise WebError(error.code, 422) from None
     except ImageGenerationError as error:
         _log_outcome(correlation_id, error.code, monotonic() - started_at)
         raise _image_error(error.code) from None
@@ -441,6 +445,9 @@ def _render_error(
     description: str = "",
     retry_after: int | None = None,
 ) -> HTMLResponse:
+    if code == "content_policy_rejected":
+        title = ""
+        description = ""
     response = _render(
         request,
         title=title if isinstance(title, str) else "",
@@ -481,6 +488,11 @@ def _message(code: str) -> str:
         "request_too_large": "The request is too large.",
         "rate_limited": "Too many generation attempts. Please try again later.",
         "busy": "A card is already being generated. Please try again shortly.",
+        "content_policy_rejected": (
+            "This request can't be used to create an image. Please describe an "
+            "original, fictional subject without real people, protected characters "
+            "or brands, named artists, or any depiction of minors."
+        ),
         "safety_rejected": "This description could not be generated. Revise it and try again.",
         "provider_timeout": "Card generation took too long. Please try again.",
         "provider_unavailable": "Card generation is temporarily unavailable.",

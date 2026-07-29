@@ -79,6 +79,8 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
                             "FANTASY_CARD_IMAGE_GENERATOR": "foundry",
                             "AZURE_OPENAI_ENDPOINT": endpoint,
                             "AZURE_OPENAI_DEPLOYMENT_NAME": "image-deployment",
+                            "FANTASY_CARD_RAI_POLICY_NAME": "fantasy-cards-content-policy-v1",
+                            "FANTASY_CARD_RAI_POLICY_VERSION": "1",
                         }
                     )
 
@@ -90,6 +92,8 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
             mode="foundry",
             endpoint="https://example.openai.azure.com",
             deployment="image-deployment",
+            rai_policy_name="fantasy-cards-content-policy-v1",
+            rai_policy_version="1",
         )
 
         with TemporaryDirectory() as output_directory:
