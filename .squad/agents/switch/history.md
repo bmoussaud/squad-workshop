@@ -33,3 +33,5 @@
 - Cookie-authenticated POST routes require CSRF protection and tests for the two state-changing POST surfaces.
 - Anonymous access is denied except agreed health probes; missing/non-owner artifacts must remain indistinguishable 404; pre-existing ownerless artifacts are not migrated and age out through the 30-day lifecycle.
 - PR smoke support must use real OIDC/session auth or a disabled-by-default test identity that is impossible to enable in production. No production auth-bypass hook is acceptable.
+
+📌 Team update (2026-07-29T11:11:09+02:00): LESSON from issue #61 closure: when the coordinator or PO asks for a verdict, restating the constraint is not an answer. Switch's quality role owes a recommendation; in this case the final verdict was that losing unattended authenticated PR end-to-end generation is an ACCEPTABLE LOSS while health-only PR smoke remains valuable and auth-bypass substitutes remain rejected. — recorded by Scribe
