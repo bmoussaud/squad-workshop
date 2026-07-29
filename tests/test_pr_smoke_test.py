@@ -215,9 +215,25 @@ class SmokeTestFailureTests(unittest.TestCase):
         self.assertEqual(sleep.delays, [1.0])
         self.assertEqual(len(transport.calls), 2)
 
-    def test_non_retryable_404_fails_fast_without_exhausting_deadline(self) -> None:
-        # A 404 means the wrong thing is deployed. Even with a huge deadline the
-        # run must fail on the first attempt without any backoff sleeps.
+    def test_early_404_is_retried_then_recovers(self) -> None:
+        # ACA ingress can briefly answer 404 while a fresh revision and its route
+        # table propagate; health 404s inside the warm-up window should retry.
+        transport = ScriptedTransport(live=[_resp(404), _resp(404), _live_ok()], ready=[_ready_ok()])
+        sleep = RecordingSleep()
+
+        result = smoke.run_smoke_test(
+            BASE_URL,
+            deadline_seconds=1000.0,
+            transport=transport,
+            sleep=sleep,
+            monotonic=FakeClock(step=0.0),
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.live.attempts, 3)
+        self.assertEqual(sleep.delays, [1.0, 2.0])
+
+    def test_persistent_404_still_fails_closed_after_bounded_grace(self) -> None:
         transport = ScriptedTransport(live=[_resp(404)])
         sleep = RecordingSleep()
 
@@ -232,9 +248,8 @@ class SmokeTestFailureTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.live.reason_code, "unexpected_status")
         self.assertEqual(result.live.status_code, 404)
-        self.assertEqual(result.live.attempts, 1)
-        self.assertEqual(sleep.delays, [])
-        self.assertEqual(len(transport.calls), 1)
+        self.assertEqual(result.live.attempts, smoke.WARMUP_404_MAX_ATTEMPTS + 1)
+        self.assertEqual(len(sleep.delays), smoke.WARMUP_404_MAX_ATTEMPTS)
 
     def test_500_is_not_retried(self) -> None:
         transport = ScriptedTransport(live=[_resp(500)])
@@ -281,7 +296,7 @@ class SmokeTestFailureTests(unittest.TestCase):
         # The fail-fast side is only pinned by 404/500 in the base suite; assert
         # a spread of other 4xx/5xx answers also fail on the first attempt with
         # no backoff, so none of them can silently drift into the retryable set.
-        for status in (400, 401, 403, 404, 405, 409, 418, 451, 500, 501, 505):
+        for status in (400, 401, 403, 405, 409, 418, 451, 500, 501, 505):
             with self.subTest(status=status):
                 transport = ScriptedTransport(live=[_resp(status)])
                 sleep = RecordingSleep()
