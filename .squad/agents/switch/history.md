@@ -44,6 +44,10 @@
 📌 Team update (2026-07-28T17:36:00+02:00): PR ownership validation must parse only genuine top-level Markdown closing references. Mask code spans (including balanced nested delimiters), fenced/indented blocks, blockquotes, and tables; preserve offsets/newlines; retain one-unique-issue fail-closed enforcement and environment-backed PR-body access. — decided by Switch
 📌 Team update (2026-07-28T20:14:00+02:00): Switch shipped #27 as PR #58 and correctly invalidated the coordinator's phantom red-build claim: invoke tests as `PYTHONPATH=src python -m pytest`, since a bare invocation can import a sibling worktree. Clean-worktree rapid idles are suspicious no-ops, not successful delegated work. Switch is now on #42. — recorded by Scribe
 
+- 2026-07-29T10:19:41+02:00 — Planned issue #61 artifact-auth quality gate: acceptance requires owner-bound artifact reads, fail-closed identity handling, enumeration resistance, safe logs/errors, and PR smoke auth that does not create a production bypass.
+
+📌 Team update (2026-07-29T10:19:41+02:00): Issue #61 design synthesis included the security test matrix and kept manual deployed Container App verification for identity-header spoofing as required evidence because it cannot be fully automated locally. — decided by Squad Coordinator
+
 ## 2026-07-29 — Proactive #49 content-policy test design
 
 📌 Proactive: I wrote these test cases from the #49 acceptance criteria while Tank was implementing. They may need adjustment once the implementation is final.
