@@ -36,3 +36,8 @@ Key retained history:
 
 📌 Team update (2026-07-29T10:19:41+02:00): Issue #61 design synthesis adopted the platform friction finding for Entra app registration and PR redirect URIs, while pairing it with Morpheus's Easy Auth + owner-binding recommendation and Trinity's cross-user idempotency leak discovery. — decided by Squad Coordinator
 
+
+- 2026-07-29 #61 PO ruling follow-up: Confirmed Tank platform decision still holds under app-level single-tenant session auth. Recommended Container App secret key-ring rotation, public minimal health endpoints for ACA/PR smoke only, stateless signed cookies over shared session storage for MVP, auth on both externally reachable apps, and auth telemetry without logging tokens/cookies/raw identity values.
+
+- 2026-07-29 #61 OIDC clarification: Updated platform analysis for PO-chosen in-app Entra ID authorization-code flow plus app session cookies. Entra app registration and PR redirect URI management are back in scope; app-level sessions remove Easy Auth/authConfigs but not directory/app-registration friction. Recommended Authlib/MSAL-family maintained implementation, Container App secret key ring, strict redirect URI automation, public minimal health only, and explicit auth telemetry.
+📌 Team update (2026-07-29T11:05:00+02:00): Decision-ledger inbox entries must use JSON syntax for `Supersedes`; write quoted decision IDs inside a JSON list, for example `["D-issue-61-artifact-auth-platform"]`, not bare IDs. — recorded by Scribe
