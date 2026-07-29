@@ -43,4 +43,10 @@ param oidcClientId = readEnvironmentVariable('FANTASY_CARD_OIDC_CLIENT_ID', '000
 param oidcClientSecret = readEnvironmentVariable('FANTASY_CARD_OIDC_CLIENT_SECRET', 'provisioning-placeholder-only')
 param sessionSecretCurrent = readEnvironmentVariable('FANTASY_CARD_SESSION_SECRET_CURRENT', 'provisioning-placeholder-current-0000')
 param sessionSecretPrevious = readEnvironmentVariable('FANTASY_CARD_SESSION_SECRET_PREVIOUS', 'provisioning-placeholder-previous-000')
-param applicationExternalIngress = bool(readEnvironmentVariable('FANTASY_CARD_EXTERNAL_INGRESS', 'false'))
+// Default is open (true) so that the legacy pull_request_target workflow (which runs from
+// main and does not set FANTASY_CARD_EXTERNAL_INGRESS) can reach the health endpoints during
+// its smoke test.  The PR Azure Environment workflow explicitly echoes
+// "FANTASY_CARD_EXTERNAL_INGRESS=false" in its "Configure shared bindings" step before
+// azd provision, which overrides this default and keeps ingress closed until the
+// configure_auth job opens it after installing real OIDC credentials.
+param applicationExternalIngress = bool(readEnvironmentVariable('FANTASY_CARD_EXTERNAL_INGRESS', 'true'))

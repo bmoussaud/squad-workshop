@@ -112,6 +112,18 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
                 self.assertIn("rc=$?\n          set -e", block)
                 self.assertIn("printf '%s\\n' \"$output\"", block)
 
+    def test_smoke_test_runs_only_after_trusted_auth_is_configured(self) -> None:
+        # Smoke must not fire before configure_auth opens ingress and installs real OIDC
+        # credentials. pull_request_target runs the base-branch (main) workflow, which
+        # previously had smoke inside the deploy job. This assertion ensures the step is
+        # absent from deploy and present only in configure_auth.
+        deploy_job = _job_block(self.workflow, "deploy")
+        self.assertNotIn("Smoke test (/health/live + /health/ready)", deploy_job)
+        configure_auth_job = _job_block(self.workflow, "configure_auth")
+        self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
+        # configure_auth must depend on deploy completing successfully
+        self.assertIn("needs: [preflight, deploy]", configure_auth_job)
+
     def test_resource_group_is_tagged_before_azd_provision(self) -> None:
         create_block = _step_block(self.workflow, "Create and atomically tag PR resource group")
         self.assertIn('rg="rg-${AZURE_ENV_NAME}"', create_block)
