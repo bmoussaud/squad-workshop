@@ -100,11 +100,14 @@ def _load_manifest(team_root: Path) -> dict[str, Any]:
 
 def _parse_blocks(data: bytes) -> list[tuple[int, int, bytes]]:
     matches = list(HEADING_PATTERN.finditer(data))
-    return [
-        (match.start(), matches[index + 1].start() if index + 1 < len(matches) else len(data),
-         data[match.start(): matches[index + 1].start() if index + 1 < len(matches) else len(data)])
-        for index, match in enumerate(matches)
-    ]
+    blocks: list[tuple[int, int, bytes]] = []
+    legacy_heading = b"\n## Legacy Compatibility"
+    for index, match in enumerate(matches):
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(data)
+        legacy_start = data.find(legacy_heading, match.start(), next_start)
+        end = legacy_start if legacy_start != -1 else next_start
+        blocks.append((match.start(), end, data[match.start():end]))
+    return blocks
 
 
 def _parse_decision(block: bytes) -> Decision:

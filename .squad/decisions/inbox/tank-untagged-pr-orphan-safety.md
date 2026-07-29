@@ -1,4 +1,0 @@
-### 2026-07-28: Untagged PR resource-group orphan safety boundary
-**By:** Tank
-**What:** The janitor retains its strict tag allowlist for normal automatic deletion. A separate legacy path may only report an untagged candidate after it exactly matches `rg-pr-<number>-<slug>-<hash8>`, its PR is absent from the active list, and GitHub verifies that the PR closed at least 24 hours ago. Deletion of that separate set requires a manual workflow dispatch with both the untagged-reap opt-in and dry-run disabled. The deployment workflow now creates the deterministic RG with lifecycle tags in the initial ARM request before `azd provision`.
-**Why:** Untagged RGs cannot be safely identified by absence of metadata alone. Exact historical convention, independently verified closed-PR age, and explicit operator confirmation keep the shared Foundry RG and shared ACR outside the deletion boundary while repairing the tag-after-provision orphan window.
