@@ -149,6 +149,23 @@ class CliTests(unittest.TestCase):
         self.assertIn("temporarily unavailable", error_output.getvalue())
         self.assertNotIn("private prompt", error_output.getvalue())
 
+    def test_overlong_input_is_refused_without_echo_or_composition(self) -> None:
+        rejected = "CLI_PROMPT_CANARY_" + ("x" * 1001)
+        error_output = StringIO()
+
+        with patch("fantasy_cards.cli.load_dotenv"), patch(
+            "sys.argv", ["fantasy-card", "Ember Sentinel", rejected]
+        ), patch("fantasy_cards.cli.build_local_application") as build, redirect_stderr(
+            error_output
+        ):
+            exit_code = main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(error_output.getvalue(), "Error: The card name or description is invalid.\n")
+        self.assertNotIn(rejected, error_output.getvalue())
+        self.assertNotIn("CLI_PROMPT_CANARY", error_output.getvalue())
+        build.assert_not_called()
+
     def test_real_openai_internal_server_error_returns_without_traceback(self) -> None:
         request = httpx.Request(
             "POST",

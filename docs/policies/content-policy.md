@@ -40,7 +40,11 @@ Production enforcement is a required combination:
 The application enforces this policy in `GenerationService` before idempotency
 lookup, artifact writes, or any image-generator/provider call. The validator
 normalizes Unicode, strips zero-width formatting characters, and compares both
-normalized and compacted forms to resist simple spacing and leetspeak evasion.
+normalized and compacted forms to resist simple spacing, confusable-character,
+and leetspeak evasion. Recognized protected-name collisions are denied before
+any generic-word interpretation; no title or phrase allowlist can override a
+deny decision. Unsupported-script and indeterminate named-entity/style forms
+fail closed.
 It is intentionally a conservative product boundary, not a claim that lexical
 matching alone solves semantic or multilingual content classification.
 
@@ -50,6 +54,10 @@ The Bicep deployment defines and binds `fantasy-cards-content-policy-v1`
 (repository configuration version `1`) to a newly provisioned image deployment.
 It inherits `Microsoft.DefaultV2` and retains blocking Medium thresholds for
 Hate, Sexual, Violence, and Self-harm on both prompt and completion paths.
+Jailbreak and Protected Material Text controls are explicitly retained. The
+policy also binds the versioned prompt blocklist
+`fantasy-cards-protected-names-v1`, whose canonical properties and exact items
+are deployed from Bicep.
 The deployed Container Apps receive the non-secret
 `FANTASY_CARD_RAI_POLICY_NAME` and `FANTASY_CARD_RAI_POLICY_VERSION` values;
 Foundry-mode application composition refuses to start if either is missing.
@@ -57,12 +65,20 @@ Foundry-mode application composition refuses to start if either is missing.
 ### Operational Verification and Updates
 
 This repository cannot prove the state of a live Foundry resource. Before a
-production release, an authorized operator must verify that the target account
-contains policy `fantasy-cards-content-policy-v1`, that the target deployment's
-`raiPolicyName` is exactly that value, and that the policy's blocking filters
-match this document. Record the non-secret policy/deployment identifiers and
-verification timestamp in the release evidence; do not record prompts,
-credentials, or endpoint secrets.
+production release, an authorized operator must run
+`infra/scripts/verify_rai_policy.py`. The `azd` post-provision hook makes this a
+blocking gate whenever `DEPLOY_FOUNDRY=true`. The verifier uses the canonical
+2024-10-01 ARM GET resources for the deployment, RAI policy, blocklist, and
+blocklist items. It requires the deployment's `properties.raiPolicyName`, the
+policy's exact `properties.contentFilters` and `properties.customBlocklists`,
+and the blocklist's canonical description/item properties. Missing access,
+missing properties, aliases, or drift fail the deployment gate. Environment
+configuration alone is never accepted as live evidence.
+
+Record the non-secret policy/deployment identifiers and verification timestamp
+in the release evidence; do not record prompts, credentials, or endpoint
+secrets. If canonical ARM reads are unavailable, production acceptance remains
+blocked.
 
 To update the policy, create a new versioned policy name, update the Bicep
 parameter/default and app configuration together, run the adversarial suite,

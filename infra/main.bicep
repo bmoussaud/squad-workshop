@@ -222,3 +222,6 @@ output AZURE_CONTAINER_REGISTRY_ENDPOINT string = web.outputs.containerRegistryE
 output AZURE_STORAGE_ACCOUNT_URL string = web.outputs.storageAccountUrl
 output FANTASY_CARD_BLOB_CONTAINER string = web.outputs.blobContainerName
 output APPLICATION_IDENTITY_PRINCIPAL_ID string = foundry.outputs.applicationIdentityPrincipalId
+output FANTASY_CARD_RAI_POLICY_NAME string = foundry.outputs.raiPolicyName
+output FANTASY_CARD_RAI_POLICY_VERSION string = foundry.outputs.raiPolicyVersion
+output FANTASY_CARD_RAI_BLOCKLIST_NAME string = foundry.outputs.raiBlocklistName

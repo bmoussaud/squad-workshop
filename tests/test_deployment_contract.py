@@ -183,6 +183,18 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("basePolicyName: 'Microsoft.DefaultV2'", self.foundry_bicep)
         self.assertIn("raiPolicyName: raiPolicyName", self.foundry_bicep)
         self.assertIn("raiPolicyVersion", self.foundry_bicep)
+        self.assertIn("customBlocklists:", self.foundry_bicep)
+        self.assertIn("blocklistName: raiBlocklistName", self.foundry_bicep)
+        self.assertIn(
+            "Microsoft.CognitiveServices/accounts/raiBlocklists@2024-10-01",
+            self.foundry_bicep,
+        )
+        self.assertIn(
+            "Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems@2024-10-01",
+            self.foundry_bicep,
+        )
+        for control in ("Jailbreak", "Protected Material Text", "Crystal Guardian"):
+            self.assertIn(control, self.foundry_bicep)
         for variable in (
             "FANTASY_CARD_RAI_POLICY_NAME",
             "FANTASY_CARD_RAI_POLICY_VERSION",
@@ -190,6 +202,10 @@ class DeploymentContractTests(unittest.TestCase):
             self.assertGreaterEqual(self.web_bicep.count(variable), 2)
         self.assertIn("fantasy-cards-content-policy-v1", self.content_policy)
         self.assertIn("operational verification", self.content_policy.lower())
+        self.assertEqual(
+            self.azure["hooks"]["postprovision"]["run"],
+            "uv run python infra/scripts/verify_rai_policy.py --gate-if-foundry-deployed",
+        )
 
     def test_azd_declares_only_the_approved_web_container_app_service(self) -> None:
         self.assertEqual(self.azure["name"], "fantasy-cards")
@@ -355,7 +371,6 @@ class DeploymentContractTests(unittest.TestCase):
     def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
         migration = self.legacy_blob_role_migration
 
-        self.assertNotIn("hooks", self.azure)
         self.assertNotIn(
             "retire_legacy_storage_blob_role.py",
             (REPOSITORY_ROOT / "azure.yaml").read_text(encoding="utf-8"),

@@ -31,7 +31,11 @@ from fantasy_cards.config import (
     WebSettings,
     build_web_application,
 )
-from fantasy_cards.content_policy import ContentPolicyRejected
+from fantasy_cards.content_policy import (
+    ContentPolicyRejected,
+    InvalidGenerationRequest,
+    validate_generation_fields,
+)
 from fantasy_cards.domain import CardGenerationRequest, GenerationJob
 from fantasy_cards.telemetry import (
     configure_telemetry,
@@ -367,9 +371,9 @@ def _validated_input(payload: Any, idempotency_key: str | None) -> GenerationInp
     description = payload["description"]
     if not isinstance(title, str) or not isinstance(description, str):
         raise WebError("invalid_request", 422)
-    title = title.strip()
-    description = description.strip()
-    if not 1 <= len(title) <= 80 or not 1 <= len(description) <= 1000:
+    try:
+        title, description = validate_generation_fields(title, description)
+    except InvalidGenerationRequest:
         raise WebError("invalid_request", 422)
     if idempotency_key is not None and (
         not 1 <= len(idempotency_key) <= 128
@@ -445,13 +449,10 @@ def _render_error(
     description: str = "",
     retry_after: int | None = None,
 ) -> HTMLResponse:
-    if code == "content_policy_rejected":
-        title = ""
-        description = ""
     response = _render(
         request,
-        title=title if isinstance(title, str) else "",
-        description=description if isinstance(description, str) else "",
+        title="",
+        description="",
         result=None,
         error=_message(code),
         status_code=status_code,

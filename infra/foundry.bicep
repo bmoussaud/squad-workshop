@@ -25,6 +25,31 @@ param modelCapacity int
 param raiPolicyName string = 'fantasy-cards-content-policy-v1'
 @description('Repository-managed version for the custom RAI policy configuration.')
 param raiPolicyVersion string = '1'
+@description('Versioned custom prompt blocklist bound to the RAI policy.')
+param raiBlocklistName string = 'fantasy-cards-protected-names-v1'
+
+var raiBlocklistItems = [
+  {
+    name: 'crystal-guardian'
+    pattern: 'Crystal Guardian'
+  }
+  {
+    name: 'hollow-knight'
+    pattern: 'Hollow Knight'
+  }
+  {
+    name: 'mickey-mouse'
+    pattern: 'Mickey Mouse'
+  }
+  {
+    name: 'pikachu'
+    pattern: 'Pikachu'
+  }
+  {
+    name: 'taylor-swift'
+    pattern: 'Taylor Swift'
+  }
+]
 
 var resolvedSharedFoundryResourceGroupName = empty(sharedFoundryResourceGroupName) ? resourceGroup().name : sharedFoundryResourceGroupName
 // Built-in role definition ID for "Cognitive Services OpenAI User" (subscriptionResourceId is stable across regions/tenants).
@@ -127,6 +152,28 @@ resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-06-01
   name: foundryAccountName
 }
 
+// native-bicep-fallback: The selected Cognitive Services account AVM does not expose RAI blocklist creation.
+resource policyBlocklist 'Microsoft.CognitiveServices/accounts/raiBlocklists@2024-10-01' = if (deployFoundry) {
+  parent: foundryAccountResource
+  name: raiBlocklistName
+  properties: {
+    description: 'Versioned protected-name prompt blocklist for fantasy card generation.'
+  }
+  dependsOn: [
+    foundryAccount
+  ]
+}
+
+// native-bicep-fallback: The selected Cognitive Services account AVM does not expose RAI blocklist item creation.
+resource policyBlocklistItems 'Microsoft.CognitiveServices/accounts/raiBlocklists/raiBlocklistItems@2024-10-01' = [for item in raiBlocklistItems: if (deployFoundry) {
+  parent: policyBlocklist
+  name: item.name
+  properties: {
+    isRegex: false
+    pattern: item.pattern
+  }
+}]
+
 // native-bicep-fallback: The selected Cognitive Services account AVM does not expose custom RAI policy creation or deployment policy binding.
 resource contentPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10-01-preview' = if (deployFoundry) {
   parent: foundryAccountResource
@@ -191,10 +238,30 @@ resource contentPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10
         blocking: true
         severityThreshold: 'Medium'
       }
+      {
+        name: 'Jailbreak'
+        source: 'Prompt'
+        enabled: true
+        blocking: true
+      }
+      {
+        name: 'Protected Material Text'
+        source: 'Completion'
+        enabled: true
+        blocking: true
+      }
+    ]
+    customBlocklists: [
+      {
+        blocklistName: raiBlocklistName
+        blocking: true
+        source: 'Prompt'
+      }
     ]
   }
   dependsOn: [
     foundryAccount
+    policyBlocklistItems
   ]
 }
 
@@ -266,6 +333,7 @@ output applicationIdentityPrincipalId string = applicationIdentity.outputs.princ
 output applicationIdentityResourceId string = applicationIdentity.outputs.resourceId
 output raiPolicyName string = raiPolicyName
 output raiPolicyVersion string = raiPolicyVersion
+output raiBlocklistName string = raiBlocklistName
 @secure()
 output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
 output applicationInsightsResourceId string = applicationInsights.outputs.resourceId
