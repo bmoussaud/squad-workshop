@@ -48,7 +48,7 @@ matching alone solves semantic or multilingual content classification.
 
 The Bicep deployment defines and binds `fantasy-cards-content-policy-v1`
 (repository configuration version `1`) to a newly provisioned image deployment.
-It inherits `Microsoft.DefaultV2` and retains blocking Medium thresholds for
+It inherits `Microsoft.DefaultV2` and strengthens blocking thresholds to Low for
 Hate, Sexual, Violence, and Self-harm on both prompt and completion paths.
 The deployed Container Apps receive the non-secret
 `FANTASY_CARD_RAI_POLICY_NAME` and `FANTASY_CARD_RAI_POLICY_VERSION` values;
@@ -64,10 +64,25 @@ match this document. Record the non-secret policy/deployment identifiers and
 verification timestamp in the release evidence; do not record prompts,
 credentials, or endpoint secrets.
 
-To update the policy, create a new versioned policy name, update the Bicep
+Tank (Azure Platform Engineer) owns deployment and rollback. Rai owns the
+required responsible-AI review for every new policy version. To update the
+policy, create a new versioned policy name, update the Bicep
 parameter/default and app configuration together, run the adversarial suite,
-preview the deployment, bind the new policy to the deployment, then repeat the
-operational verification. Do not change an existing version in place.
+preview the deployment, obtain Rai approval, bind the new policy to the
+deployment, and repeat the operational verification. Do not change an existing
+version in place.
+
+Retain the previous approved custom policy for rollback. Roll back by restoring
+its identifier and version in the Bicep configuration, redeploying, and
+repeating the same policy and deployment read-back checks. Do not roll back to
+`Microsoft.DefaultV2` alone because it does not implement this product policy.
+
+As of 2026-07-29, the Bicep policy and deployment attachment compile locally,
+but live deployment is **unverified**: the recorded target account
+`fnd-fantasy-cards-dev-8f327f8c` is absent from the active subscription.
+Creating a replacement account or deployment is billable and requires explicit
+approval. Production remains blocked until the read-back verification in step
+above succeeds against the designated production Foundry resource.
 
 ## User-Facing Refusal
 

@@ -178,7 +178,7 @@ This does **not** change data-at-rest placement. Stored data, including the abus
 
 Rationale: EU-bound inference is not currently purchasable for this model in the target context. `gpt-image-2` is not listed under `DataZoneStandard` or regional `Standard`; the live subscription exposes `GlobalStandard` only, with no DataZone quota. Constraining inference to the EU would require abandoning the model. Where Data Zone pricing exists, it carries roughly a 10% premium.
 
-Current deployed development state: account `fnd-fantasy-cards-dev-8f327f8c` (`AIServices/S0`, `swedencentral`), deployment `gpt-image-2-dev`, model `gpt-image-2` version `2026-04-21`, `GlobalStandard`, capacity 1, RAI policy `Microsoft.DefaultV2`.
+Last verified development state (2026-07-28): account `fnd-fantasy-cards-dev-8f327f8c` (`AIServices/S0`, `swedencentral`), deployment `gpt-image-2-dev`, model `gpt-image-2` version `2026-04-21`, `GlobalStandard`, capacity 1, RAI policy `Microsoft.DefaultV2`. On 2026-07-29 the account was absent from the active subscription, so the new `fantasy-cards-content-policy-v1` policy could not be deployed or read back. Do not treat the prior state as current production evidence.
 
 Revisit this decision if EU residency becomes a contractual or regulatory requirement, or if Microsoft makes `gpt-image-2` available under an EU-bound deployment type.
 
