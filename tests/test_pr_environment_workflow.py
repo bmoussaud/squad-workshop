@@ -123,6 +123,25 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
             self.workflow.index("- name: azd provision"),
         )
 
+    def test_shared_platform_dependencies_are_validated_before_provisioning(self) -> None:
+        validate = _step_block(self.workflow, "Validate shared platform dependencies")
+        self.assertIn("SHARED_CONTAINER_REGISTRY_RESOURCE_GROUP_NAME", validate)
+        self.assertIn("SHARED_FOUNDRY_RESOURCE_GROUP_NAME", validate)
+        self.assertIn("az group exists", validate)
+        self.assertIn("az acr show", validate)
+        self.assertIn("az cognitiveservices account show", validate)
+        self.assertIn("/projects/${SHARED_FOUNDRY_PROJECT_NAME}", validate)
+        self.assertIn("az cognitiveservices account deployment show", validate)
+        self.assertIn('if [ "$DEPLOY_FOUNDRY" = "false" ]', validate)
+        self.assertLess(
+            self.workflow.index("- name: Validate shared platform dependencies"),
+            self.workflow.index("- name: Create and atomically tag PR resource group"),
+        )
+        self.assertLess(
+            self.workflow.index("- name: Validate shared platform dependencies"),
+            self.workflow.index("- name: azd provision"),
+        )
+
     def test_pr_oidc_registration_runs_on_fresh_trusted_runner(self) -> None:
         deploy = _job_block(self.workflow, "deploy")
         configure = _job_block(self.workflow, "configure_auth")
