@@ -1169,7 +1169,10 @@ resource replicaCeilingAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 	}
 }
 
-output serviceUri string = 'https://${privateContainerApp.outputs.fqdn}'
+// The private app runs in the VNet that can reach the private Blob endpoint. Its
+// ingress starts closed and is opened by the trusted workflow, so the AVM output
+// is initially an internal FQDN. Publish the eventual external FQDN instead.
+output serviceUri string = privateApplicationBaseUrl
 output containerAppName string = privateContainerApp.outputs.name
 output containerAppsEnvironmentName string = privateContainerAppsEnvironment.name
 output containerRegistryEndpoint string = containerRegistryLoginServer

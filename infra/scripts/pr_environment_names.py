@@ -10,10 +10,12 @@ branch): the ``azd`` environment name is ``pr-{number}-{slug[:N]}-{hash8}`` wher
 
 * ``number`` is the GitHub PR number,
 * ``slug`` is the sanitized and, when needed, display-truncated slug derived from
-  the stable branch convention ``squad/{issue}-{slug}``, or the equivalent
+  the stable branch convention ``squad/{issue}-{slug}``, the equivalent
   owner-prefixed, slash-flattened Copilot App branch form
-  ``{owner}-squad-{issue}-{slug}`` (lowercase letters, digits, hyphens;
-  collapsed separators; trimmed), and
+  ``{owner}-squad-{issue}-{slug}``, or a legacy owner-prefixed Copilot App head
+  branch ``{owner}-{slug}`` from PRs created before the issue-token convention
+  shipped (lowercase letters, digits, hyphens; collapsed separators; trimmed),
+  and
 * ``hash8`` is the first 8 lowercase hex chars of
   ``sha256("{repo}|{prNumber}|{slug}")``.
 
@@ -127,19 +129,29 @@ def slug_from_branch(branch: str, *, expected_owner: str | None = None) -> str:
     The canonical form is ``squad/{issue}-{slug}``. Copilot App's
     ``rename_branch`` tool prepends the owner and replaces the slash with a
     hyphen, so its equivalent ``{owner}-squad-{issue}-{slug}`` form is accepted
-    as well. When ``expected_owner`` is supplied, owner-prefixed branches must
-    use that exact repository owner.
+    as well. Historical Copilot App PRs created before that convention shipped
+    may still have the legacy ``{owner}-{slug}`` head-branch form; it is accepted
+    only when ``expected_owner`` is supplied, so generic non-Squad branch names
+    do not become valid by accident. When ``expected_owner`` is supplied,
+    owner-prefixed branches must use that exact repository owner.
 
     Raises ``ValueError`` for any branch that does not follow the convention or
     that yields an empty slug after sanitization.
     """
     if not isinstance(branch, str) or not branch.strip():
         raise ValueError("branch must be a non-empty string")
-    match = _BRANCH_RE.match(branch.strip())
+    stripped_branch = branch.strip()
+    match = _BRANCH_RE.match(stripped_branch)
     if match is None:
+        if expected_owner is not None:
+            normalized_owner = expected_owner.strip().lower()
+            legacy_prefix = f"{normalized_owner}-"
+            if stripped_branch.lower().startswith(legacy_prefix):
+                return sanitize_slug(stripped_branch[len(legacy_prefix) :])
         raise ValueError(
             f"branch {branch!r} does not follow the required "
-            "'squad/{issue}-{slug}' or '{owner}-squad-{issue}-{slug}' convention"
+            "'squad/{issue}-{slug}', '{owner}-squad-{issue}-{slug}', or "
+            "legacy '{owner}-{slug}' convention"
         )
     owner = match.group("owner")
     if owner is not None and expected_owner is not None and owner != expected_owner.lower():
@@ -472,7 +484,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--branch",
         required=True,
-        help="PR head branch (must follow squad/{issue}-{slug})",
+        help=(
+            "PR head branch (squad/{issue}-{slug}, {owner}-squad-{issue}-{slug}, "
+            "or legacy {owner}-{slug})"
+        ),
     )
     parser.add_argument(
         "--format",

@@ -93,7 +93,7 @@ class PreflightCliDecisionTests(unittest.TestCase):
         self.assertEqual(fields["reason_code"], "untrusted_repo")
 
     def test_non_conforming_branch_blocks(self) -> None:
-        code, fields = _run(**{"--branch": "bmoussaud-musical-spork"})
+        code, fields = _run(**{"--branch": "feature/musical-spork"})
         self.assertEqual(code, preflight.BLOCKED_EXIT_CODE)
         self.assertEqual(fields["reason_code"], "invalid_names")
 
@@ -101,6 +101,12 @@ class PreflightCliDecisionTests(unittest.TestCase):
         code, fields = _run(
             **{"--branch": "bmoussaud-squad-14-render-card-layout"}
         )
+        self.assertEqual(code, 0)
+        self.assertEqual(fields["decision"], "proceed")
+        self.assertEqual(fields["reason_code"], "ok")
+
+    def test_legacy_copilot_app_branch_proceeds(self) -> None:
+        code, fields = _run(**{"--branch": "bmoussaud-rebrand-modern-ui"})
         self.assertEqual(code, 0)
         self.assertEqual(fields["decision"], "proceed")
         self.assertEqual(fields["reason_code"], "ok")

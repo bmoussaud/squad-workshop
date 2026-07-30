@@ -1,8 +1,11 @@
 import json
+from hashlib import sha256
 import os
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+
+from itsdangerous import URLSafeTimedSerializer
 
 from fantasy_cards.adapters import InMemoryArtifactStore, InMemoryJobRepository
 from fantasy_cards.application import GenerationService
@@ -11,6 +14,8 @@ from fantasy_cards.domain import CardGenerationRequest
 
 
 class ContentPolicyServiceTests(unittest.TestCase):
+    owner_subject = "owner-a"
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -37,7 +42,13 @@ class ContentPolicyServiceTests(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 with self.assertRaises(ContentPolicyRejected) as raised:
                     self.service.generate(
-                        CardGenerationRequest(title, prompt, f"corr-{index}", "same-key")
+                        CardGenerationRequest(
+                            title,
+                            prompt,
+                            f"corr-{index}",
+                            "same-key",
+                            self.owner_subject,
+                        )
                     )
                 self.assertEqual(raised.exception.code, "content_policy_rejected")
                 self.assertNotIn(prompt, str(raised.exception))
@@ -53,6 +64,10 @@ class ContentPolicyServiceTests(unittest.TestCase):
 
 
 class ContentPolicyWebTests(unittest.TestCase):
+    owner_subject = "owner-a"
+    csrf_token = "csrf-token"
+    session_secret = "s" * 48
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -63,14 +78,39 @@ class ContentPolicyWebTests(unittest.TestCase):
             "FANTASY_CARD_MAX_GENERATION_CONCURRENCY": "1",
             "FANTASY_CARD_RATE_LIMIT_ATTEMPTS": "10",
             "FANTASY_CARD_RATE_LIMIT_WINDOW_SECONDS": "600",
+            "AZURE_TENANT_ID": "11111111-1111-4111-8111-111111111111",
+            "FANTASY_CARD_OIDC_CLIENT_ID": "22222222-2222-4222-8222-222222222222",
+            "FANTASY_CARD_OIDC_CLIENT_SECRET": "test-client-credential",
+            "FANTASY_CARD_APPLICATION_BASE_URL": "http://localhost:8000",
+            "FANTASY_CARD_SESSION_SECRET_CURRENT": self.session_secret,
         }
 
-    def _client(self):
+    def _client(self, authenticated: bool = True):
         from fastapi.testclient import TestClient
 
         from fantasy_cards.web import create_app
 
-        return TestClient(create_app())
+        client = TestClient(create_app())
+        if authenticated:
+            self.authenticate_client(client)
+        return client
+
+    def authenticate_client(self, client: object) -> None:
+        serializer = URLSafeTimedSerializer(
+            self.session_secret,
+            salt="fantasy-cards-session-v1",
+            signer_kwargs={"digest_method": sha256},
+        )
+        client.cookies.set(
+            "fantasy-cards-session",
+            serializer.dumps(
+                {
+                    "owner_subject": self.owner_subject,
+                    "csrf_token": self.csrf_token,
+                }
+            ),
+        )
+        client.headers["X-CSRF-Token"] = self.csrf_token
 
     def test_api_rejection_is_safe_logged_and_never_calls_provider(self) -> None:
         rejected = "Taylor Swift as an elven queen POLICY_CANARY_49"

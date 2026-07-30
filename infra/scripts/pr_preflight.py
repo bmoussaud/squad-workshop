@@ -330,7 +330,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repo", required=True, help="base owner/name repository slug")
     parser.add_argument("--pr-number", required=True, type=int, help="GitHub PR number")
     parser.add_argument(
-        "--branch", required=True, help="PR head branch (squad/{issue}-{slug})"
+        "--branch",
+        required=True,
+        help=(
+            "PR head branch (squad/{issue}-{slug}, {owner}-squad-{issue}-{slug}, "
+            "or legacy {owner}-{slug})"
+        ),
     )
     parser.add_argument(
         "--is-fork",

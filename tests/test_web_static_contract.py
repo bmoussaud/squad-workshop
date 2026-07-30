@@ -112,7 +112,7 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertRegex(compact, r"@media\s*\(max-width:")
         self.assertRegex(compact, r"min-height\s*:\s*(?:44px|48px|2\.75rem|3rem)")
 
-    def test_css_centralizes_green_background_palette(self) -> None:
+    def test_css_uses_semantic_surface_and_interaction_tokens(self) -> None:
         from fastapi.testclient import TestClient
         from fantasy_cards.web import create_app
 
@@ -125,55 +125,111 @@ class WebStaticContractTests(unittest.TestCase):
                 ).group("path")
                 css = client.get(stylesheet_path).text.lower()
 
-        self.assertIn("--paper: #e4f1df;", css)
-        self.assertIn("--surface: #f7fcf4;", css)
-        self.assertIn("--muted: #556052;", css)
-        self.assertIn("--coral: #9e3a31;", css)
-        self.assertIn("--gold: #7a5d16;", css)
-        self.assertIn("--line: #697564;", css)
-        self.assertIn("background: var(--paper);", css)
-        self.assertIn("background-color: var(--paper);", css)
-        self.assertIn("background: rgba(228, 241, 223, 0.96);", css)
-        self.assertIn("background: #d8ecd2;", css)
-        outdated_paper = "#" + "f7" + "f3" + "e8"
-        outdated_masthead = "rgba(" + ", ".join(("247", "243", "232"))
-        self.assertNotIn(outdated_paper, css)
-        self.assertNotIn(outdated_masthead, css)
+        for token in (
+            "--canvas:",
+            "--surface:",
+            "--surface-subtle:",
+            "--border:",
+            "--accent:",
+            "--accent-strong:",
+            "--focus:",
+            "--danger:",
+            "--success:",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+        self.assertIn("background: linear-gradient(", css)
+        self.assertNotIn("data:image/svg+xml", css)
 
-    def test_green_palette_preserves_text_and_ui_contrast(self) -> None:
-        backgrounds = {
-            "paper": "#e4f1df",
-            "surface": "#f7fcf4",
-            "result": "#d8ecd2",
-        }
-        normal_text = {
-            "ink": "#17251d",
-            "muted": "#556052",
-            "coral": "#9e3a31",
-            "gold": "#7a5d16",
-        }
-        ui_components = {
-            "line": "#697564",
-            "focus": "#0b6c88",
-            "forest": "#24513a",
-            "forest-deep": "#173a29",
-        }
+    def test_visual_tokens_preserve_text_and_ui_contrast(self) -> None:
+        from fastapi.testclient import TestClient
+        from fantasy_cards.web import create_app
 
-        for background_name, background in backgrounds.items():
-            for foreground_name, foreground in normal_text.items():
-                with self.subTest(
-                    background=background_name, foreground=foreground_name
-                ):
-                    self.assertGreaterEqual(
-                        _contrast_ratio(foreground, background), 4.5
-                    )
-            for foreground_name, foreground in ui_components.items():
-                with self.subTest(
-                    background=background_name, foreground=foreground_name
-                ):
-                    self.assertGreaterEqual(
-                        _contrast_ratio(foreground, background), 3.0
-                    )
+        with patch.dict(os.environ, self.environment, clear=True):
+            with TestClient(create_app()) as client:
+                self.authenticate(client)
+                html = client.get("/").text
+                stylesheet_path = re.search(
+                    r'href="(?P<path>/static/[^"]+\.css)"', html
+                ).group("path")
+                stylesheet = client.get(stylesheet_path)
+
+        self.assertEqual(stylesheet.status_code, 200)
+        root = re.search(
+            r":root\s*\{(?P<declarations>.*?)\}", stylesheet.text, re.DOTALL
+        )
+        self.assertIsNotNone(root, "served stylesheet must declare :root design tokens")
+        declared_tokens = dict(
+            re.findall(
+                r"(?m)^\s*(--[a-z-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;",
+                root.group("declarations"),
+            )
+        )
+        expected_tokens = {
+            "--ink": "#172033",
+            "--muted": "#4b5565",
+            "--canvas": "#f7f9fc",
+            "--surface": "#ffffff",
+            "--surface-subtle": "#f1f5f9",
+            "--accent": "#2f5be7",
+            "--accent-strong": "#2448b8",
+            "--accent-subtle": "#e8efff",
+            "--success": "#157347",
+            "--danger": "#b42318",
+            "--focus": "#0b63ce",
+        }
+        for token, expected_value in expected_tokens.items():
+            with self.subTest(token=token):
+                self.assertEqual(declared_tokens.get(token), expected_value)
+
+        result_gradient = re.search(
+            r"background\s*:\s*linear-gradient\(\s*145deg\s*,\s*"
+            r"var\((--[a-z-]+)\)\s+0%\s*,\s*"
+            r"var\((--[a-z-]+)\)\s+100%\s*\)",
+            stylesheet.text,
+        )
+        self.assertIsNotNone(
+            result_gradient, "result surface must retain its token-based gradient"
+        )
+        self.assertEqual(
+            result_gradient.groups(), ("--surface", "--accent-subtle")
+        )
+        _, result_surface_end = result_gradient.groups()
+
+        text_pairs = (
+            ("--ink", "--canvas"),
+            ("--ink", "--surface"),
+            ("--ink", result_surface_end),
+            ("--muted", "--canvas"),
+            ("--muted", "--surface"),
+            ("--muted", "--surface-subtle"),
+            ("--muted", result_surface_end),
+            ("--accent-strong", "--surface"),
+            ("--success", result_surface_end),
+            ("--danger", "--surface"),
+        )
+        ui_pairs = (
+            ("--accent", "--surface"),
+            ("--accent", result_surface_end),
+            ("--focus", "--surface"),
+            ("--focus", result_surface_end),
+        )
+        for foreground, background in text_pairs:
+            with self.subTest(foreground=foreground, background=background):
+                self.assertGreaterEqual(
+                    _contrast_ratio(
+                        declared_tokens[foreground], declared_tokens[background]
+                    ),
+                    4.5,
+                )
+        for foreground, background in ui_pairs:
+            with self.subTest(foreground=foreground, background=background):
+                self.assertGreaterEqual(
+                    _contrast_ratio(
+                        declared_tokens[foreground], declared_tokens[background]
+                    ),
+                    3.0,
+                )
 
     def test_javascript_is_progressive_enhancement_not_required_navigation(self) -> None:
         from fastapi.testclient import TestClient
@@ -192,6 +248,7 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn("fetch(", script)
         self.assertIn("disabled", script)
         self.assertTrue("aria-busy" in script or "aria-live" in html.lower())
+        self.assertIn("prefers-reduced-motion: reduce", script)
         self.assertNotIn("window.location", script)
 
 

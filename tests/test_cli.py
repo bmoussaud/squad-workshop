@@ -77,6 +77,7 @@ class CliTests(unittest.TestCase):
             "os.environ",
             {
                 "FANTASY_CARD_IMAGE_GENERATOR": "foundry",
+                "AZURE_CLIENT_ID": "33333333-3333-4333-8333-333333333333",
                 "AZURE_OPENAI_ENDPOINT": "https://cards.openai.azure.com",
                 "AZURE_OPENAI_DEPLOYMENT_NAME": "gpt-image-2-deployment",
                 "FANTASY_CARD_RAI_POLICY_NAME": "fantasy-cards-content-policy-v1",
@@ -168,6 +169,7 @@ class CliTests(unittest.TestCase):
         error_output = StringIO()
         environment = {
             "FANTASY_CARD_IMAGE_GENERATOR": "foundry",
+            "AZURE_CLIENT_ID": "33333333-3333-4333-8333-333333333333",
             "AZURE_OPENAI_ENDPOINT": (
                 "https://example.services.ai.azure.com/openai/v1"
             ),

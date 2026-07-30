@@ -55,6 +55,14 @@ class SlugExtractionTests(unittest.TestCase):
             "render-card-layout",
         )
 
+    def test_extracts_slug_from_legacy_copilot_app_branch(self) -> None:
+        self.assertEqual(
+            naming.slug_from_branch(
+                "bmoussaud-rebrand-modern-ui", expected_owner="bmoussaud"
+            ),
+            "rebrand-modern-ui",
+        )
+
     def test_sanitizes_uppercase_and_separators(self) -> None:
         self.assertEqual(
             naming.slug_from_branch("squad/7-Fix__Login  Validation--Now"),
@@ -76,6 +84,10 @@ class SlugExtractionTests(unittest.TestCase):
     def test_rejects_copilot_branch_for_a_different_repository_owner(self) -> None:
         with self.assertRaises(ValueError):
             naming.compute_names(REPO, 14, "my-squad-1-x")
+
+    def test_rejects_legacy_branch_for_a_different_repository_owner(self) -> None:
+        with self.assertRaises(ValueError):
+            naming.compute_names(REPO, 14, "my-rebrand-modern-ui")
 
     def test_rejects_empty_slug_after_sanitization(self) -> None:
         with self.assertRaises(ValueError):

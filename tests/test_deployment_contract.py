@@ -249,6 +249,13 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertEqual(azd_target_modules, ["privateContainerApp"])
         self.assertIn("name: privateContainerAppName", app_blocks["privateContainerApp"])
         self.assertRegex(app_blocks["containerApp"], r"(?m)^\s*tags:\s*tags\s*$")
+        self.assertIn(
+            "output serviceUri string = privateApplicationBaseUrl", self.web_bicep
+        )
+        self.assertIn(
+            "output containerAppName string = privateContainerApp.outputs.name",
+            self.web_bicep,
+        )
 
     def test_container_runtime_is_non_root_and_uses_the_approved_entry_point(self) -> None:
         instructions: dict[str, list[str]] = {}
