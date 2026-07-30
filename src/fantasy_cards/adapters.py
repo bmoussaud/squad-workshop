@@ -17,7 +17,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Protocol
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from PIL import Image, UnidentifiedImageError
 
@@ -26,6 +26,7 @@ from fantasy_cards.domain import (
     ArtifactContent,
     GeneratedImage,
     GenerationJob,
+    is_valid_owner_subject,
 )
 from fantasy_cards.telemetry import dependency_span, record_span_outcome
 
@@ -69,6 +70,10 @@ _ARTIFACT_EXTENSIONS = {
 }
 _MAX_WEB_ARTIFACT_BYTES = 10 * 1024 * 1024
 _CARD_IMAGE_SIZE = "1024x1536"
+_REJECTED_AZURE_CLIENT_IDS = {
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-4000-8000-000000000000",
+}
 
 
 def build_card_prompt(title: str, description: str) -> str:
@@ -187,8 +192,9 @@ def create_foundry_client(endpoint: str, timeout_seconds: float) -> _ImagesClien
     from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     from openai import OpenAI
 
+    credential_kwargs = _default_credential_kwargs()
     token_provider = get_bearer_token_provider(
-        DefaultAzureCredential(), "https://ai.azure.com/.default"
+        DefaultAzureCredential(**credential_kwargs), "https://ai.azure.com/.default"
     )
     return OpenAI(
         base_url=base_url,
@@ -343,8 +349,11 @@ class InMemoryArtifactStore:
     def __init__(self, output_directory: str | Path = "artifacts") -> None:
         self._output_directory = Path(output_directory)
         self._content: dict[str, bytes] = {}
+        self._owners: dict[str, str] = {}
 
-    def save(self, content: bytes, media_type: str) -> Artifact:
+    def save(self, content: bytes, media_type: str, owner_subject: str) -> Artifact:
+        if not is_valid_owner_subject(owner_subject):
+            raise ValueError("owner_subject must not be blank")
         artifact_id = str(uuid4())
         extension = _ARTIFACT_EXTENSIONS.get(media_type, ".bin")
         self._output_directory.mkdir(parents=True, exist_ok=True)
@@ -365,14 +374,21 @@ class InMemoryArtifactStore:
                 temporary_path.unlink(missing_ok=True)
 
         self._content[artifact_id] = content
+        self._owners[artifact_id] = owner_subject
         return Artifact(
             artifact_id=artifact_id,
             media_type=media_type,
             size_bytes=len(content),
             file_path=str(file_path),
+            owner_subject=owner_subject,
         )
 
-    def read(self, artifact_id: str) -> ArtifactContent:
+    def read(self, artifact_id: str, owner_subject: str) -> ArtifactContent:
+        if (
+            not is_valid_owner_subject(owner_subject)
+            or self._owners.get(artifact_id) != owner_subject
+        ):
+            raise KeyError(artifact_id)
         content = self._content[artifact_id]
         path = next(self._output_directory.glob(f"{artifact_id}.*"), None)
         media_type = "image/png" if path and path.suffix == ".png" else "text/plain"
@@ -408,8 +424,13 @@ class BlobArtifactStore:
         self._container_name = container_name
         self._service_client = service_client
 
-    def save(self, content: bytes, media_type: str) -> Artifact:
-        if media_type != "image/png" or not content or len(content) > _MAX_WEB_ARTIFACT_BYTES:
+    def save(self, content: bytes, media_type: str, owner_subject: str) -> Artifact:
+        if (
+            media_type != "image/png"
+            or not content
+            or len(content) > _MAX_WEB_ARTIFACT_BYTES
+            or not is_valid_owner_subject(owner_subject)
+        ):
             raise ArtifactStorageError(
                 "artifact_unavailable", "The generated artifact could not be stored."
             )
@@ -426,6 +447,7 @@ class BlobArtifactStore:
                         content,
                         overwrite=False,
                         content_settings=ContentSettings(content_type="image/png"),
+                        metadata={"owner_subject": owner_subject},
                     )
                 except ResourceExistsError:
                     continue
@@ -445,13 +467,14 @@ class BlobArtifactStore:
                     media_type="image/png",
                     size_bytes=len(content),
                     file_path=blob_name,
+                    owner_subject=owner_subject,
                 )
             record_span_outcome(span, "failed", error_code="artifact_unavailable")
             raise ArtifactStorageError(
                 "artifact_unavailable", "The generated artifact could not be stored."
             )
 
-    def read(self, artifact_id: str) -> ArtifactContent:
+    def read(self, artifact_id: str, owner_subject: str) -> ArtifactContent:
         from azure.core.exceptions import ResourceNotFoundError
 
         try:
@@ -463,10 +486,16 @@ class BlobArtifactStore:
 
         with dependency_span("blob", "read") as span:
             try:
-                downloader = self._container_client().get_blob_client(
+                blob_client = self._container_client().get_blob_client(
                     f"{artifact_id}.png"
-                ).download_blob(max_concurrency=1)
-                properties = downloader.properties
+                )
+                properties = blob_client.get_blob_properties()
+                metadata = properties.metadata or {}
+                if (
+                    not is_valid_owner_subject(owner_subject)
+                    or metadata.get("owner_subject") != owner_subject
+                ):
+                    raise ArtifactNotFoundError()
                 size_bytes = int(properties.size)
                 media_type = properties.content_settings.content_type
                 if (
@@ -477,8 +506,9 @@ class BlobArtifactStore:
                     raise ArtifactStorageError(
                         "artifact_unavailable", "The requested artifact is unavailable."
                     )
+                downloader = blob_client.download_blob(max_concurrency=1)
                 content = downloader.readall()
-            except ResourceNotFoundError:
+            except (ResourceNotFoundError, ArtifactNotFoundError):
                 record_span_outcome(span, "not_found", error_code="artifact_not_found")
                 raise ArtifactNotFoundError() from None
             except ArtifactStorageError as error:
@@ -507,9 +537,10 @@ class BlobArtifactStore:
             from azure.identity import DefaultAzureCredential
             from azure.storage.blob import BlobServiceClient
 
+            credential_kwargs = _default_credential_kwargs()
             self._service_client = BlobServiceClient(
                 account_url=self._account_url,
-                credential=DefaultAzureCredential(),
+                credential=DefaultAzureCredential(**credential_kwargs),
             )
         return self._service_client.get_container_client(self._container_name)
 
@@ -534,14 +565,29 @@ def _translate_blob_error(error: Exception, action: str) -> ArtifactStorageError
 
 class InMemoryJobRepository:
     def __init__(self) -> None:
-        self._jobs: dict[str, GenerationJob] = {}
+        self._jobs: dict[tuple[str, str], GenerationJob] = {}
 
-    def get_by_idempotency_key(self, idempotency_key: str) -> GenerationJob | None:
-        return self._jobs.get(idempotency_key)
+    def get_by_idempotency_key(
+        self, owner_subject: str, idempotency_key: str
+    ) -> GenerationJob | None:
+        return self._jobs.get((owner_subject, idempotency_key))
 
     def save(self, job: GenerationJob) -> None:
-        self._jobs[job.idempotency_key] = job
+        self._jobs[(job.artifact.owner_subject, job.idempotency_key)] = job
 
 
 def deterministic_idempotency_key(title: str, prompt: str) -> str:
     return sha256(f"{title}\0{prompt}".encode()).hexdigest()
+
+
+def _default_credential_kwargs() -> dict[str, str]:
+    raw_client_id = os.getenv("AZURE_CLIENT_ID")
+    if raw_client_id is None or not raw_client_id.strip():
+        return {}
+    try:
+        client_id = str(UUID(raw_client_id.strip()))
+    except ValueError:
+        raise ValueError("AZURE_CLIENT_ID must be a valid GUID.") from None
+    if client_id in _REJECTED_AZURE_CLIENT_IDS:
+        raise ValueError("AZURE_CLIENT_ID contains a reserved GUID value.")
+    return {"managed_identity_client_id": client_id}

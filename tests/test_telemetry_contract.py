@@ -1,4 +1,5 @@
 import importlib
+from hashlib import sha256
 import json
 import logging
 import os
@@ -12,8 +13,13 @@ from tempfile import TemporaryDirectory
 from types import ModuleType
 from unittest.mock import Mock, patch
 
+from itsdangerous import URLSafeTimedSerializer
+
 
 class TelemetryContractTests(unittest.TestCase):
+    session_secret = "s" * 48
+    csrf_token = "csrf-token"
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -21,8 +27,27 @@ class TelemetryContractTests(unittest.TestCase):
             "FANTASY_CARD_IMAGE_GENERATOR": "in-memory",
             "FANTASY_CARD_ARTIFACT_STORE": "filesystem",
             "FANTASY_CARD_OUTPUT_DIR": self.output_directory.name,
+            "AZURE_TENANT_ID": "11111111-1111-4111-8111-111111111111",
+            "FANTASY_CARD_OIDC_CLIENT_ID": "22222222-2222-4222-8222-222222222222",
+            "FANTASY_CARD_OIDC_CLIENT_SECRET": "test-client-credential",
+            "FANTASY_CARD_APPLICATION_BASE_URL": "http://localhost:8000",
+            "FANTASY_CARD_SESSION_SECRET_CURRENT": self.session_secret,
             "USERPROFILE": str(Path.home()),
         }
+
+    def authenticate(self, client: object) -> None:
+        serializer = URLSafeTimedSerializer(
+            self.session_secret,
+            salt="fantasy-cards-session-v1",
+            signer_kwargs={"digest_method": sha256},
+        )
+        client.cookies.set(
+            "fantasy-cards-session",
+            serializer.dumps(
+                {"owner_subject": "owner-a", "csrf_token": self.csrf_token}
+            ),
+        )
+        client.headers["X-CSRF-Token"] = self.csrf_token
 
     def fake_telemetry_modules(
         self, configure: Mock, instrument: Mock, credential_factory: Mock
@@ -138,9 +163,46 @@ class TelemetryContractTests(unittest.TestCase):
             credential_factory,
         ) as module:
             second_app = module.create_app()
+            from fastapi.testclient import TestClient
+
+            with TestClient(module.app) as first_client, TestClient(second_app) as second_client:
+                self.assertEqual(first_client.get("/health/ready").status_code, 503)
+                self.assertEqual(second_client.get("/health/ready").status_code, 503)
 
         self.assertIsNotNone(module.app)
         self.assertIsNotNone(second_app)
+        credential_factory.assert_not_called()
+        configure.assert_not_called()
+        instrument.assert_not_called()
+
+    def test_connection_string_with_reserved_client_id_reports_not_ready(self) -> None:
+        configure = Mock(side_effect=AssertionError("telemetry must not be configured"))
+        instrument = Mock(side_effect=AssertionError("instrumentation must remain disabled"))
+        credential_factory = Mock(
+            side_effect=AssertionError("reserved identity must be rejected before auth setup")
+        )
+        with self.isolated_web_import(
+            {
+                **self.environment,
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": (
+                    "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+                ),
+                "AZURE_CLIENT_ID": "00000000-0000-4000-8000-000000000000",
+            },
+            configure,
+            instrument,
+            credential_factory,
+        ) as module:
+            from fastapi.testclient import TestClient
+
+            with TestClient(module.app) as client:
+                ready = client.get("/health/ready")
+
+        self.assertEqual(ready.status_code, 503)
+        self.assertEqual(
+            ready.json(),
+            {"status": "not_ready", "reason": "configuration_error"},
+        )
         credential_factory.assert_not_called()
         configure.assert_not_called()
         instrument.assert_not_called()
@@ -163,6 +225,7 @@ class TelemetryContractTests(unittest.TestCase):
             side_effect=ImageGenerationError("provider_timeout", private_bytes),
         ), self.assertLogs("fantasy_cards.web", level=logging.INFO) as captured:
             with TestClient(module.create_app()) as client:
+                self.authenticate(client)
                 response = client.post(
                     "/api/generations",
                     json={"title": private_title, "description": private_prompt},
@@ -204,6 +267,7 @@ class TelemetryContractTests(unittest.TestCase):
             self.environment, configure, instrument
         ) as module, self.assertLogs("fantasy_cards.web", level=logging.INFO) as captured:
             with TestClient(module.create_app(application=application)) as client:
+                self.authenticate(client)
                 response = client.get(f"/api/artifacts/{artifact_id}")
 
         configure.assert_not_called()

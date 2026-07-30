@@ -10,10 +10,10 @@ single machine-readable verdict the workflow consumes for the comment.
 Cold-start reality: a freshly deployed Container App has zero warm replicas, so
 the first probes routinely fail while a replica boots. Those *transient* early
 failures are expected and are retried with bounded exponential backoff against a
-hard overall deadline. The script never retries forever, and it never retries a
-*non-transient* answer -- a ``404`` on ``/health/ready`` means the wrong image
-is deployed (or the route is gone), and retrying it would only burn the deadline
-before failing anyway.
+hard overall deadline. The script never retries forever. A short, bounded 404
+warm-up grace is applied only to health endpoints because ACA ingress can briefly
+return 404 during revision/route propagation immediately after deploy; once that
+grace is exhausted, 404 fails fast as before.
 
 Retry policy (see ``RETRYABLE_STATUSES`` and ``_classify``):
 
@@ -23,8 +23,12 @@ Retry policy (see ``RETRYABLE_STATUSES`` and ``_classify``):
   replica" signal a cold start produces, and readiness itself answers ``503``
   until the app finishes wiring up. A genuinely misconfigured app stays ``503``
   and is caught by the deadline rather than hanging.
-* FAIL FAST -- any other status, including ``404`` (wrong thing deployed),
-  ``4xx`` config errors, and ``500`` (an application bug is not transient).
+* FAIL FAST -- any other status, including non-404 ``4xx`` config errors and
+  ``500`` (an application bug is not transient).
+* BOUNDED 404 GRACE -- for health endpoints only, early ``404`` answers are
+  retried for a short warm-up window, then treated as fail-fast
+  ``unexpected_status``. This keeps true misroutes fail-closed while avoiding
+  false negatives during startup propagation.
   A ``200`` whose body is not the expected payload is also a fast failure:
   something is serving, but it is not the app we deployed.
 
@@ -63,6 +67,8 @@ READY_EXPECTED_STATUS = "ready"
 # throttling. Everything else (404, other 4xx, 500) is treated as a stable
 # answer and fails fast -- retrying it would only waste the deadline.
 RETRYABLE_STATUSES = frozenset({408, 429, 502, 503, 504})
+WARMUP_404_MAX_ATTEMPTS = 6
+WARMUP_404_GRACE_SECONDS = 45.0
 
 # Defaults tuned for a Container App cold start (single small replica).
 DEFAULT_DEADLINE_SECONDS = 180.0
@@ -278,6 +284,7 @@ def _poll_endpoint(
     *,
     transport: Transport,
     deadline: float,
+    warmup_404_deadline: float,
     request_timeout: float,
     backoff: BackoffPolicy,
     sleep: Callable[[float], None],
@@ -290,6 +297,19 @@ def _poll_endpoint(
         outcome = _probe(url, expected_status, transport, request_timeout)
         if outcome.healthy:
             return EndpointResult(path, True, outcome.status_code, attempt, "ok", "")
+        if (
+            outcome.status_code == 404
+            and not outcome.retryable
+            and attempt <= WARMUP_404_MAX_ATTEMPTS
+            and monotonic() < warmup_404_deadline
+        ):
+            outcome = _ProbeOutcome(
+                False,
+                True,
+                404,
+                "transient_not_found",
+                "HTTP 404 during warm-up window",
+            )
         if not outcome.retryable:
             return EndpointResult(
                 path, False, outcome.status_code, attempt, outcome.reason_code, outcome.detail
@@ -341,6 +361,7 @@ def run_smoke_test(
         LIVE_EXPECTED_STATUS,
         transport=active_transport,
         deadline=deadline,
+        warmup_404_deadline=start + WARMUP_404_GRACE_SECONDS,
         request_timeout=request_timeout_seconds,
         backoff=policy,
         sleep=sleep,
@@ -353,6 +374,7 @@ def run_smoke_test(
             READY_EXPECTED_STATUS,
             transport=active_transport,
             deadline=deadline,
+            warmup_404_deadline=start + WARMUP_404_GRACE_SECONDS,
             request_timeout=request_timeout_seconds,
             backoff=policy,
             sleep=sleep,

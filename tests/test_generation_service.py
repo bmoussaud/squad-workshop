@@ -13,6 +13,8 @@ from fantasy_cards.domain import CardGenerationRequest, JobStatus
 
 
 class GenerationServiceTests(unittest.TestCase):
+    owner_subject = "owner-a"
+
     def setUp(self) -> None:
         self.output_directory = TemporaryDirectory()
         self.addCleanup(self.output_directory.cleanup)
@@ -30,6 +32,7 @@ class GenerationServiceTests(unittest.TestCase):
             prompt="A knight made of living flame",
             correlation_id="corr-123",
             idempotency_key="idem-123",
+            owner_subject=self.owner_subject,
         )
 
         job = self.service.generate(request)
@@ -47,21 +50,40 @@ class GenerationServiceTests(unittest.TestCase):
             b"generated card for: Ember Sentinel | A knight made of living flame",
         )
         self.assertEqual(
-            self.artifact_store.read(job.artifact.artifact_id),
+            self.artifact_store.read(job.artifact.artifact_id, self.owner_subject),
             b"generated card for: Ember Sentinel | A knight made of living flame",
         )
         self.assertIs(
-            self.job_repository.get_by_idempotency_key("idem-123"), job
+            self.job_repository.get_by_idempotency_key(
+                self.owner_subject, "idem-123"
+            ),
+            job,
         )
 
     def test_reuses_the_existing_job_for_an_idempotency_key(self) -> None:
-        first_request = CardGenerationRequest("A", "first", "corr-1", "same")
-        second_request = CardGenerationRequest("B", "second", "corr-2", "same")
+        first_request = CardGenerationRequest(
+            "A", "first", "corr-1", "same", self.owner_subject
+        )
+        second_request = CardGenerationRequest(
+            "B", "second", "corr-2", "same", self.owner_subject
+        )
 
         first_job = self.service.generate(first_request)
         second_job = self.service.generate(second_request)
 
         self.assertIs(second_job, first_job)
+
+    def test_idempotency_keys_are_scoped_per_owner(self) -> None:
+        first = self.service.generate(
+            CardGenerationRequest("A", "first", "corr-1", "same", "owner-a")
+        )
+        second = self.service.generate(
+            CardGenerationRequest("A", "first", "corr-2", "same", "owner-b")
+        )
+
+        self.assertNotEqual(first.job_id, second.job_id)
+        self.assertEqual(first.artifact.owner_subject, "owner-a")
+        self.assertEqual(second.artifact.owner_subject, "owner-b")
 
     def test_uses_allowlisted_media_type_extensions(self) -> None:
         cases = (
@@ -72,7 +94,9 @@ class GenerationServiceTests(unittest.TestCase):
 
         for media_type, expected_extension in cases:
             with self.subTest(media_type=media_type):
-                artifact = self.artifact_store.save(b"content", media_type)
+                artifact = self.artifact_store.save(
+                    b"content", media_type, self.owner_subject
+                )
                 artifact_path = Path(artifact.file_path)
 
                 self.assertEqual(artifact_path.suffix, expected_extension)
@@ -81,15 +105,22 @@ class GenerationServiceTests(unittest.TestCase):
 
     def test_uuid_collision_preserves_original_disk_and_memory_content(self) -> None:
         with patch("fantasy_cards.adapters.uuid4", return_value="fixed-id"):
-            artifact = self.artifact_store.save(b"original", "text/plain")
+            artifact = self.artifact_store.save(
+                b"original", "text/plain", self.owner_subject
+            )
 
             for replacement in (b"replacement-one", b"replacement-two"):
                 with self.subTest(replacement=replacement):
                     with self.assertRaises(FileExistsError):
-                        self.artifact_store.save(replacement, "text/plain")
+                        self.artifact_store.save(
+                            replacement, "text/plain", self.owner_subject
+                        )
 
                     self.assertEqual(Path(artifact.file_path).read_bytes(), b"original")
-                    self.assertEqual(self.artifact_store.read("fixed-id"), b"original")
+                    self.assertEqual(
+                        self.artifact_store.read("fixed-id", self.owner_subject),
+                        b"original",
+                    )
                     self.assertEqual(
                         list(Path(self.output_directory.name).iterdir()),
                         [Path(artifact.file_path)],
@@ -116,31 +147,39 @@ class GenerationServiceTests(unittest.TestCase):
             "fantasy_cards.adapters.NamedTemporaryFile", PartialWriteFile
         ), patch("fantasy_cards.adapters.uuid4", return_value="partial-id"):
             with self.assertRaisesRegex(OSError, "partial write"):
-                self.artifact_store.save(b"content", "text/plain")
+                self.artifact_store.save(
+                    b"content", "text/plain", self.owner_subject
+                )
 
         self.assertEqual(list(Path(self.output_directory.name).iterdir()), [])
         with self.assertRaises(KeyError):
-            self.artifact_store.read("partial-id")
+            self.artifact_store.read("partial-id", self.owner_subject)
 
     def test_publication_failure_leaves_no_artifact_or_temp_file(self) -> None:
         with patch("fantasy_cards.adapters.os.link", side_effect=OSError("disk")), patch(
             "fantasy_cards.adapters.uuid4", return_value="publish-id"
         ):
             with self.assertRaises(OSError):
-                self.artifact_store.save(b"content", "text/plain")
+                self.artifact_store.save(
+                    b"content", "text/plain", self.owner_subject
+                )
 
         self.assertEqual(list(Path(self.output_directory.name).iterdir()), [])
         with self.assertRaises(KeyError):
-            self.artifact_store.read("publish-id")
+            self.artifact_store.read("publish-id", self.owner_subject)
 
     def test_successful_persistence_publishes_final_file_without_temp_residue(
         self,
     ) -> None:
         with patch("fantasy_cards.adapters.uuid4", return_value="success-id"):
-            artifact = self.artifact_store.save(b"content", "text/plain")
+            artifact = self.artifact_store.save(
+                b"content", "text/plain", self.owner_subject
+            )
 
         self.assertEqual(Path(artifact.file_path).read_bytes(), b"content")
-        self.assertEqual(self.artifact_store.read("success-id"), b"content")
+        self.assertEqual(
+            self.artifact_store.read("success-id", self.owner_subject), b"content"
+        )
         self.assertEqual(
             list(Path(self.output_directory.name).iterdir()),
             [Path(self.output_directory.name) / "success-id.txt"],
@@ -148,7 +187,7 @@ class GenerationServiceTests(unittest.TestCase):
 
     def test_rejects_blank_boundary_values(self) -> None:
         with self.assertRaisesRegex(ValueError, "prompt must not be blank"):
-            CardGenerationRequest("Title", " ", "corr", "idem")
+            CardGenerationRequest("Title", " ", "corr", "idem", self.owner_subject)
 
 
 if __name__ == "__main__":

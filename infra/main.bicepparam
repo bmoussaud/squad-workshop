@@ -38,3 +38,18 @@ param monthlyBudgetAmount = int(readEnvironmentVariable('AZURE_MONTHLY_BUDGET_AM
 param budgetStartDate = readEnvironmentVariable('AZURE_BUDGET_START_DATE')
 param alertContactEmails = split(readEnvironmentVariable('AZURE_ALERT_CONTACT_EMAILS'), ';')
 param enableApplicationSignalAlerts = bool(readEnvironmentVariable('AZURE_ENABLE_APPLICATION_SIGNAL_ALERTS'))
+param enableContainerAppsAuth = bool(readEnvironmentVariable('ENABLE_CONTAINER_APPS_AUTH', 'false'))
+param entraAuthClientId = readEnvironmentVariable('ENTRA_AUTH_CLIENT_ID', '')
+param entraAuthTenantId = readEnvironmentVariable('ENTRA_AUTH_TENANT_ID', '')
+param oidcTenantId = readEnvironmentVariable('AZURE_TENANT_ID')
+param oidcClientId = readEnvironmentVariable('FANTASY_CARD_OIDC_CLIENT_ID', '00000000-0000-4000-8000-000000000000')
+param oidcClientSecret = readEnvironmentVariable('FANTASY_CARD_OIDC_CLIENT_SECRET', 'provisioning-placeholder-only')
+param sessionSecretCurrent = readEnvironmentVariable('FANTASY_CARD_SESSION_SECRET_CURRENT', 'provisioning-placeholder-current-0000')
+param sessionSecretPrevious = readEnvironmentVariable('FANTASY_CARD_SESSION_SECRET_PREVIOUS', 'provisioning-placeholder-previous-000')
+// Default is open (true) so that the legacy pull_request_target workflow (which runs from
+// main and does not set FANTASY_CARD_EXTERNAL_INGRESS) can reach the health endpoints during
+// its smoke test.  The PR Azure Environment workflow explicitly echoes
+// "FANTASY_CARD_EXTERNAL_INGRESS=false" in its "Configure shared bindings" step before
+// azd provision, which overrides this default and keeps ingress closed until the
+// configure_auth job opens it after installing real OIDC credentials.
+param applicationExternalIngress = bool(readEnvironmentVariable('FANTASY_CARD_EXTERNAL_INGRESS', 'true'))

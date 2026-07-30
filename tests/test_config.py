@@ -8,6 +8,7 @@ from fantasy_cards.config import (
     ConfigurationError,
     ImageGeneratorSettings,
     build_local_application,
+    validate_azure_client_id,
 )
 
 
@@ -31,7 +32,9 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
             clear=True,
         ):
             application = build_local_application(client_factory=Mock())
-            artifact = application.artifact_store.save(b"content", "text/plain")
+            artifact = application.artifact_store.save(
+                b"content", "text/plain", "local-test"
+            )
 
         self.assertEqual(Path(artifact.file_path).parent, Path(output_directory))
 
@@ -96,7 +99,11 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
             rai_policy_version="1",
         )
 
-        with TemporaryDirectory() as output_directory:
+        with TemporaryDirectory() as output_directory, patch.dict(
+            "os.environ",
+            {"AZURE_CLIENT_ID": "11111111-2222-4333-8444-555555555555"},
+            clear=True,
+        ):
             build_local_application(
                 settings,
                 client_factory=factory,
@@ -104,6 +111,35 @@ class ImageGeneratorSettingsTests(unittest.TestCase):
             )
 
         factory.assert_not_called()
+
+    def test_validate_azure_client_id_rejects_invalid_and_reserved_guids(self) -> None:
+        for raw_client_id in (
+            "not-a-guid",
+            "00000000-0000-0000-0000-000000000000",
+            "00000000-0000-4000-8000-000000000000",
+        ):
+            with self.subTest(client_id=raw_client_id):
+                with self.assertRaises(ConfigurationError):
+                    validate_azure_client_id(
+                        raw_client_id,
+                        required=True,
+                        context="test context",
+                    )
+
+    def test_validate_azure_client_id_allows_empty_only_when_not_required(self) -> None:
+        self.assertIsNone(
+            validate_azure_client_id(
+                "",
+                required=False,
+                context="test context",
+            )
+        )
+        with self.assertRaises(ConfigurationError):
+            validate_azure_client_id(
+                "",
+                required=True,
+                context="test context",
+            )
 
 
 if __name__ == "__main__":

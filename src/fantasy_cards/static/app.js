@@ -31,6 +31,7 @@ if (form && statusRegion && resultRegion) {
     const button = form.querySelector("button[type='submit']");
     const title = form.elements.title.value.trim();
     const description = form.elements.description.value.trim();
+    const csrfToken = form.elements.csrf_token.value;
     button.disabled = true;
     button.classList.add("is-busy");
     statusRegion.textContent = "Generating your card. This may take a moment.";
@@ -38,7 +39,10 @@ if (form && statusRegion && resultRegion) {
     try {
       const response = await fetch("/api/generations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
         body: JSON.stringify({ title, description }),
       });
       const payload = await response.json();

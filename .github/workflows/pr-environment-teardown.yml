@@ -78,7 +78,53 @@ jobs:
     outputs:
       status: ${{ steps.reclaim.outputs.status }}
     steps:
-      - name: Azure CLI login (OIDC, for az group/tag)
+      - name: Directory automation login
+        uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          creds: ${{ secrets.ENTRA_AUTOMATION_CREDENTIALS }}
+          allow-no-subscriptions: true
+
+      - name: Delete the isolated PR OIDC application
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$PR_NUMBER" | grep -Eq '^[0-9]+$'; then
+            echo "::error::PR_NUMBER is not a non-negative integer."
+            exit 1
+          fi
+          display_name="squad-workshop-pr-${PR_NUMBER}"
+          marker="squad-workshop-pr-auth"
+          applications="$(az rest --method GET \
+            --url "https://graph.microsoft.com/v1.0/applications?\$filter=displayName%20eq%20'${display_name}'&\$select=id,appId,tags" \
+            --output json)"
+          application_rows="$(printf '%s' "$applications" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(f\"{app['id']} {app['appId']}\") for app in d.get('value', []) if '$marker' in app.get('tags', [])]")"
+          if [ -z "$application_rows" ]; then
+            echo "No isolated OIDC application found for PR ${PR_NUMBER}; nothing to delete."
+          else
+            while read -r object_id client_id; do
+              [ -z "$object_id" ] && continue
+              service_principals="$(az rest --method GET \
+                --url "https://graph.microsoft.com/v1.0/servicePrincipals?\$filter=appId%20eq%20'${client_id}'&\$select=id,tags" \
+                --output json)"
+              printf '%s' "$service_principals" | python3 -c "import json,sys; d=json.load(sys.stdin); [print(sp['id']) for sp in d.get('value', []) if '$marker' in sp.get('tags', [])]" |
+                while IFS= read -r service_principal_id; do
+                  [ -z "$service_principal_id" ] && continue
+                  az rest --method DELETE \
+                    --url "https://graph.microsoft.com/v1.0/servicePrincipals/${service_principal_id}"
+                done
+              az rest --method DELETE \
+                --url "https://graph.microsoft.com/v1.0/applications/${object_id}"
+            done <<< "$application_rows"
+          fi
+
+      - name: Clear directory automation session
+        run: |
+          set -euo pipefail
+          az logout
+          az account clear
+
+      - name: Azure resource login (OIDC, for resource-group teardown)
         uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
