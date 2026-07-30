@@ -247,7 +247,7 @@
         {
           "byte_end": 26838,
           "byte_start": 25579,
-          "heading": "2026-07-27T16:58:24.269+02:00: Relax CI ownership gate \u2014 branch name is convention, issue-closure stays a hard gate",
+          "heading": "2026-07-27T16:58:24.269+02:00: Relax CI ownership gate — branch name is convention, issue-closure stays a hard gate",
           "id": "L-4a259b6616cc7d7f-31",
           "sha256": "4a259b6616cc7d7f660a4efb174ba399a61f268934e797eb5a30f00e23d686b3",
           "status": "legacy-unclassified"
@@ -271,7 +271,7 @@
         {
           "byte_end": 33270,
           "byte_start": 30783,
-          "heading": "2026-07-27T20:05:43+02:00: Phase 3 PR-environment seam review \u2014 APPROVE WITH CHANGES (#15)",
+          "heading": "2026-07-27T20:05:43+02:00: Phase 3 PR-environment seam review — APPROVE WITH CHANGES (#15)",
           "id": "L-4da5f3da39091d96-34",
           "sha256": "4da5f3da39091d96af3bd770ab867f59d8201cbf22867d03ff5a11ad6756601f",
           "status": "legacy-unclassified"
@@ -279,7 +279,7 @@
         {
           "byte_end": 34900,
           "byte_start": 33270,
-          "heading": "2026-07-27T20:04:31+02:00: Switch \u2014 Phase 3 (#15) test-quality review: APPROVE WITH CHANGES",
+          "heading": "2026-07-27T20:04:31+02:00: Switch — Phase 3 (#15) test-quality review: APPROVE WITH CHANGES",
           "id": "L-e85afd48b10e4f27-35",
           "sha256": "e85afd48b10e4f2768807e4d10f0b83ff2314ad0cc85680fd444943a68f6e26a",
           "status": "legacy-unclassified"
@@ -311,7 +311,7 @@
         {
           "byte_end": 41784,
           "byte_start": 40352,
-          "heading": "2026-07-27: Phase 4 teardown/janitor security review \u2014 \ud83d\udfe2 GREEN (#20)",
+          "heading": "2026-07-27: Phase 4 teardown/janitor security review — 🟢 GREEN (#20)",
           "id": "L-ca726e9edd6e270a-39",
           "sha256": "ca726e9edd6e270a375ac0ddf09ff194e4d50ac50170c371d95d8ed0997e1fb5",
           "status": "legacy-unclassified"
@@ -319,7 +319,7 @@
         {
           "byte_end": 43027,
           "byte_start": 41784,
-          "heading": "2026-07-27: Phase 4 TTL reaper test review \u2014 APPROVE WITH CHANGES (#20)",
+          "heading": "2026-07-27: Phase 4 TTL reaper test review — APPROVE WITH CHANGES (#20)",
           "id": "L-2bff0068a2ac4f87-40",
           "sha256": "2bff0068a2ac4f873f9e38b8e684ecc8b37899e64641ef1feef522177c7d667a",
           "status": "legacy-unclassified"
@@ -391,7 +391,7 @@
         {
           "byte_end": 55369,
           "byte_start": 53739,
-          "heading": "2026-07-28T10:05:06+02:00: Foundry approval gate closed for development only (#2) \u2014 SUPERSEDED by 2026-07-28T10:14:07+02:00 re-decision",
+          "heading": "2026-07-28T10:05:06+02:00: Foundry approval gate closed for development only (#2) — SUPERSEDED by 2026-07-28T10:14:07+02:00 re-decision",
           "id": "L-71fa88a1c567bf8a-49",
           "sha256": "71fa88a1c567bf8a91a885b0af6bdc95cd86aa916bd7aabddcf482d41e22b9c0",
           "status": "legacy-unclassified"
@@ -504,6 +504,25 @@
       "source_sha256": "4561565e05f4397117fc20b43fddf83059c10dab32df6209d595ddcdaef2cffa"
     }
   ],
-  "quarantine": [],
+  "quarantine": [
+    {
+      "inbox_file": "scribe-production-rg-topology.md",
+      "path": "decisions/quarantine/0358a36cf458c2ffdf825dd186c673b745ffd297293098a7ef1b60423ebc9e03.md",
+      "reason": "decision must begin with a level-3 heading",
+      "sha256": "0358a36cf458c2ffdf825dd186c673b745ffd297293098a7ef1b60423ebc9e03"
+    },
+    {
+      "inbox_file": "scribe-production-rg-topology.md",
+      "path": "decisions/quarantine/153e45cb8e8b6f4f5f02ea5d8e1c1637852d892bb645edd46c3838dfbcc9c6bd.md",
+      "reason": "decision must begin with a level-3 heading",
+      "sha256": "153e45cb8e8b6f4f5f02ea5d8e1c1637852d892bb645edd46c3838dfbcc9c6bd"
+    },
+    {
+      "inbox_file": "copilot-azure-env-independent-rg.md",
+      "path": "decisions/quarantine/7f8126d2cc57cea8712c3442d69514a7bb42820af3891c1c2ea71b28b38ff9c8.md",
+      "reason": "decision must begin with a level-3 heading",
+      "sha256": "7f8126d2cc57cea8712c3442d69514a7bb42820af3891c1c2ea71b28b38ff9c8"
+    }
+  ],
   "version": 2
 }
