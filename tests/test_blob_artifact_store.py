@@ -107,6 +107,7 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
             "FANTASY_CARD_ARTIFACT_STORE": "blob",
             "AZURE_STORAGE_ACCOUNT_URL": self.account_url,
             "FANTASY_CARD_BLOB_CONTAINER": self.container_name,
+            "AZURE_CLIENT_ID": "11111111-2222-4333-8444-555555555555",
         }
         credential = Mock()
         with patch.dict("os.environ", safe_environment, clear=True), patch(
@@ -117,7 +118,9 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
             application = build_web_application()
             application.artifact_reader._container_client()
 
-        credential_type.assert_called_once_with()
+        credential_type.assert_called_once_with(
+            managed_identity_client_id="11111111-2222-4333-8444-555555555555"
+        )
         service_client_type.assert_called_once_with(
             account_url=self.account_url, credential=credential
         )
@@ -129,6 +132,18 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
             build_web_application()
         self.assertNotIn("secret", str(raised.exception).lower())
 
+        with patch.dict(
+            "os.environ",
+            {
+                "FANTASY_CARD_ARTIFACT_STORE": "blob",
+                "AZURE_STORAGE_ACCOUNT_URL": self.account_url,
+                "FANTASY_CARD_BLOB_CONTAINER": self.container_name,
+                "AZURE_CLIENT_ID": "00000000-0000-0000-0000-000000000000",
+            },
+            clear=True,
+        ), self.assertRaises(ConfigurationError):
+            build_web_application()
+
         secret_environment = {
             **safe_environment,
             "AZURE_STORAGE_CONNECTION_STRING": "secret-connection-string",
@@ -138,10 +153,15 @@ class BlobArtifactStoreContractTests(unittest.TestCase):
         credential = Mock()
         with patch.dict("os.environ", secret_environment, clear=True), patch(
             "azure.identity.DefaultAzureCredential", return_value=credential
-        ), patch("azure.storage.blob.BlobServiceClient") as client_type:
+        ) as credential_type, patch(
+            "azure.storage.blob.BlobServiceClient"
+        ) as client_type:
             application = build_web_application()
             application.artifact_reader._container_client()
 
+        credential_type.assert_called_once_with(
+            managed_identity_client_id="11111111-2222-4333-8444-555555555555"
+        )
         client_type.assert_called_once_with(
             account_url=self.account_url, credential=credential
         )

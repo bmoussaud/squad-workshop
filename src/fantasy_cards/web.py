@@ -144,10 +144,12 @@ class WebRuntime:
         application: WebApplication | None,
         settings: WebSettings | None,
         configuration_error: bool,
+        configuration_error_message: str | None = None,
     ) -> None:
         self.application = application
         self.settings = settings
         self.configuration_error = configuration_error
+        self.configuration_error_message = configuration_error_message
         self.generation_slot = BoundedSemaphore(1)
         self.rate_limiter = RollingRateLimiter(
             settings.rate_limit_attempts if settings else 10,
@@ -161,19 +163,34 @@ def create_app(
     web_settings: WebSettings | None = None,
 ) -> FastAPI:
     configuration_error = False
+    configuration_error_message: str | None = None
     try:
         resolved_web_settings = (web_settings or WebSettings.from_environment()).validated()
         resolved_application = application or build_web_application(
             image_settings=image_settings,
             web_settings=resolved_web_settings,
         )
-    except (ConfigurationError, ValueError):
+    except (ConfigurationError, ValueError) as error:
         resolved_web_settings = None
         resolved_application = None
         configuration_error = True
+        configuration_error_message = str(error)
+        _LOGGER.error(
+            json.dumps(
+                {
+                    "event": "startup_configuration_failed",
+                    "component": "runtime",
+                    "error_code": "configuration_error",
+                },
+                separators=(",", ":"),
+            )
+        )
 
     runtime = WebRuntime(
-        resolved_application, resolved_web_settings, configuration_error
+        resolved_application,
+        resolved_web_settings,
+        configuration_error,
+        configuration_error_message,
     )
     templates = Environment(
         loader=FileSystemLoader(_PACKAGE_DIRECTORY / "templates"),
@@ -301,10 +318,27 @@ def create_app(
     @application_host.get("/health/ready")
     async def readiness() -> JSONResponse:
         if runtime.configuration_error or runtime.application is None:
-            return JSONResponse({"status": "not_ready"}, status_code=503)
+            return JSONResponse(
+                {"status": "not_ready", "reason": "configuration_error"},
+                status_code=503,
+            )
         return JSONResponse({"status": "ready"}, status_code=200)
 
-    configure_telemetry(application_host)
+    try:
+        configure_telemetry(application_host)
+    except ValueError as error:
+        runtime.configuration_error = True
+        runtime.configuration_error_message = str(error)
+        _LOGGER.error(
+            json.dumps(
+                {
+                    "event": "startup_configuration_failed",
+                    "component": "telemetry",
+                    "error_code": "configuration_error",
+                },
+                separators=(",", ":"),
+            )
+        )
     return application_host
 
 

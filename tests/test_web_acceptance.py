@@ -117,7 +117,9 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertEqual(live.status_code, 200)
         self.assertEqual(live.json(), {"status": "live"})
         self.assertEqual(ready.status_code, 503)
-        self.assertEqual(ready.json(), {"status": "not_ready"})
+        self.assertEqual(
+            ready.json(), {"status": "not_ready", "reason": "configuration_error"}
+        )
         self.assertNotIn("AZURE_", ready.text)
         self.assertNotIn("FANTASY_CARD_", ready.text)
 

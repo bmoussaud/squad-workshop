@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from uuid import UUID
 
 from fantasy_cards.adapters import (
     BlobArtifactStore,
@@ -36,6 +37,31 @@ class WebApplication:
 
 class ConfigurationError(ValueError):
     """A safe runtime configuration error."""
+
+
+_REJECTED_AZURE_CLIENT_IDS = {
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-4000-8000-000000000000",
+}
+
+
+def validate_azure_client_id(
+    raw_client_id: str | None, *, required: bool, context: str
+) -> str | None:
+    client_id = (raw_client_id or "").strip()
+    if not client_id:
+        if required:
+            raise ConfigurationError(
+                f"AZURE_CLIENT_ID is required for {context}."
+            )
+        return None
+    try:
+        normalized = str(UUID(client_id))
+    except ValueError:
+        raise ConfigurationError("AZURE_CLIENT_ID must be a valid GUID.") from None
+    if normalized in _REJECTED_AZURE_CLIENT_IDS:
+        raise ConfigurationError("AZURE_CLIENT_ID contains a reserved GUID value.")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +190,12 @@ def build_local_application(
 ) -> LocalApplication:
     settings = (settings or ImageGeneratorSettings.from_environment()).validated()
     client_factory = client_factory or create_foundry_client
+    if settings.mode == "foundry":
+        validate_azure_client_id(
+            os.environ.get("AZURE_CLIENT_ID"),
+            required=True,
+            context="foundry image generation",
+        )
     artifact_store = InMemoryArtifactStore(
         output_directory or os.environ.get("FANTASY_CARD_OUTPUT_DIR", "artifacts")
     )
@@ -197,6 +229,14 @@ def build_web_application(
         image_settings or ImageGeneratorSettings.from_environment()
     ).validated()
     web_settings = (web_settings or WebSettings.from_environment()).validated()
+    requires_azure_identity = (
+        image_settings.mode == "foundry" or web_settings.artifact_store == "blob"
+    )
+    validate_azure_client_id(
+        os.environ.get("AZURE_CLIENT_ID"),
+        required=requires_azure_identity,
+        context="Azure-backed web runtime",
+    )
     client_factory = client_factory or create_foundry_client
 
     artifact_store: ArtifactStore

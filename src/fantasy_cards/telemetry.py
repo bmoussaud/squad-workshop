@@ -6,21 +6,28 @@ import logging
 import os
 from threading import Lock
 from typing import Any
+from uuid import UUID
 
 _LOGGER = logging.getLogger("fantasy_cards.telemetry")
 _CONFIGURATION_LOCK = Lock()
 _CONFIGURED_WITH: Any | None = None
+_REJECTED_AZURE_CLIENT_IDS = {
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-4000-8000-000000000000",
+}
 
 
 def configure_telemetry(application: Any) -> bool:
     """Register lazy Azure Monitor configuration for one FastAPI application."""
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
-    client_id = os.getenv("AZURE_CLIENT_ID", "").strip()
-    if not connection_string or not client_id:
+    if not connection_string:
         _LOGGER.info(
             '{"event":"telemetry_configuration_selected","outcome":"disabled"}'
         )
         return False
+    client_id = _validated_client_id(
+        os.getenv("AZURE_CLIENT_ID"), required=True, context="telemetry"
+    )
 
     application.router.add_event_handler(
         "startup",
@@ -69,6 +76,23 @@ def _activate_telemetry(
         _LOGGER.warning(
             '{"event":"telemetry_configuration_failed","outcome":"disabled"}'
         )
+
+
+def _validated_client_id(
+    raw_client_id: str | None, *, required: bool, context: str
+) -> str:
+    client_id = (raw_client_id or "").strip()
+    if not client_id:
+        if required:
+            raise ValueError(f"AZURE_CLIENT_ID is required for {context}.")
+        return ""
+    try:
+        normalized = str(UUID(client_id))
+    except ValueError:
+        raise ValueError("AZURE_CLIENT_ID must be a valid GUID.") from None
+    if normalized in _REJECTED_AZURE_CLIENT_IDS:
+        raise ValueError("AZURE_CLIENT_ID contains a reserved GUID value.")
+    return normalized
 
 
 @contextmanager

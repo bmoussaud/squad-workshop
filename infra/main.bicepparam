@@ -38,3 +38,6 @@ param monthlyBudgetAmount = int(readEnvironmentVariable('AZURE_MONTHLY_BUDGET_AM
 param budgetStartDate = readEnvironmentVariable('AZURE_BUDGET_START_DATE')
 param alertContactEmails = split(readEnvironmentVariable('AZURE_ALERT_CONTACT_EMAILS'), ';')
 param enableApplicationSignalAlerts = bool(readEnvironmentVariable('AZURE_ENABLE_APPLICATION_SIGNAL_ALERTS'))
+param enableContainerAppsAuth = bool(readEnvironmentVariable('ENABLE_CONTAINER_APPS_AUTH', 'false'))
+param entraAuthClientId = readEnvironmentVariable('ENTRA_AUTH_CLIENT_ID', '')
+param entraAuthTenantId = readEnvironmentVariable('ENTRA_AUTH_TENANT_ID', '')

@@ -94,6 +94,12 @@ param alertContactEmails array
 
 @description('Enable application-signal log alerts only after Azure Validate confirms telemetry tables and queries.')
 param enableApplicationSignalAlerts bool = false
+@description('Enable Container Apps built-in Entra authentication. Keep false unless auth app client id and tenant id are configured.')
+param enableContainerAppsAuth bool = false
+@description('Entra app registration client id used by Container Apps auth for user sign-in.')
+param entraAuthClientId string = ''
+@description('Tenant id used to build the Entra OpenID issuer for Container Apps auth.')
+param entraAuthTenantId string = ''
 
 @description('Precomputed Container App resource name (Phase 1 naming module, CONTAINER_APP_NAME). Empty keeps the dev-derived name; PR environments supply an Azure-limit-safe name.')
 param containerAppName string = ''
@@ -202,6 +208,9 @@ module web 'web.bicep' = {
     budgetStartDate: budgetStartDate
     alertContactEmails: alertContactEmails
     enableApplicationSignalAlerts: enableApplicationSignalAlerts
+    enableContainerAppsAuth: enableContainerAppsAuth
+    entraAuthClientId: entraAuthClientId
+    entraAuthTenantId: entraAuthTenantId
   }
 }
 

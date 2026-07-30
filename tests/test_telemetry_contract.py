@@ -138,9 +138,46 @@ class TelemetryContractTests(unittest.TestCase):
             credential_factory,
         ) as module:
             second_app = module.create_app()
+            from fastapi.testclient import TestClient
+
+            with TestClient(module.app) as first_client, TestClient(second_app) as second_client:
+                self.assertEqual(first_client.get("/health/ready").status_code, 503)
+                self.assertEqual(second_client.get("/health/ready").status_code, 503)
 
         self.assertIsNotNone(module.app)
         self.assertIsNotNone(second_app)
+        credential_factory.assert_not_called()
+        configure.assert_not_called()
+        instrument.assert_not_called()
+
+    def test_connection_string_with_reserved_client_id_reports_not_ready(self) -> None:
+        configure = Mock(side_effect=AssertionError("telemetry must not be configured"))
+        instrument = Mock(side_effect=AssertionError("instrumentation must remain disabled"))
+        credential_factory = Mock(
+            side_effect=AssertionError("reserved identity must be rejected before auth setup")
+        )
+        with self.isolated_web_import(
+            {
+                **self.environment,
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": (
+                    "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+                ),
+                "AZURE_CLIENT_ID": "00000000-0000-4000-8000-000000000000",
+            },
+            configure,
+            instrument,
+            credential_factory,
+        ) as module:
+            from fastapi.testclient import TestClient
+
+            with TestClient(module.app) as client:
+                ready = client.get("/health/ready")
+
+        self.assertEqual(ready.status_code, 503)
+        self.assertEqual(
+            ready.json(),
+            {"status": "not_ready", "reason": "configuration_error"},
+        )
         credential_factory.assert_not_called()
         configure.assert_not_called()
         instrument.assert_not_called()

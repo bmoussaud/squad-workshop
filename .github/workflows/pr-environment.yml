@@ -236,7 +236,7 @@ jobs:
       smoke_message: ${{ steps.smoke.outputs.message }}
       expires_at: ${{ steps.tags.outputs.expires_at }}
     env:
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_OIDC_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
@@ -320,6 +320,7 @@ jobs:
           SHARED_FOUNDRY_PROJECT_NAME: ${{ vars.SHARED_FOUNDRY_PROJECT_NAME }}
           SHARED_FOUNDRY_RESOURCE_GROUP_NAME: ${{ vars.SHARED_FOUNDRY_RESOURCE_GROUP_NAME }}
           MODEL_DEPLOYMENT_NAME: ${{ vars.SHARED_MODEL_DEPLOYMENT_NAME }}
+          ENTRA_AUTH_CLIENT_ID: ${{ vars.ENTRA_AUTH_CLIENT_ID }}
           ALERT_CONTACT_EMAILS: ${{ vars.AZURE_ALERT_CONTACT_EMAILS }}
           FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
         run: |
@@ -337,6 +338,9 @@ jobs:
             echo "SHARED_FOUNDRY_PROJECT_NAME=${SHARED_FOUNDRY_PROJECT_NAME}"
             echo "SHARED_FOUNDRY_RESOURCE_GROUP_NAME=${SHARED_FOUNDRY_RESOURCE_GROUP_NAME}"
             echo "MODEL_DEPLOYMENT_NAME=${MODEL_DEPLOYMENT_NAME}"
+            echo "ENABLE_CONTAINER_APPS_AUTH=true"
+            echo "ENTRA_AUTH_CLIENT_ID=${ENTRA_AUTH_CLIENT_ID}"
+            echo "ENTRA_AUTH_TENANT_ID=${AZURE_TENANT_ID}"
           } >> "$GITHUB_ENV"
 
           # Minimum-viable values for the infra inputs main.bicepparam requires
@@ -355,18 +359,39 @@ jobs:
             echo "AZURE_ENABLE_APPLICATION_SIGNAL_ALERTS=false"
           } >> "$GITHUB_ENV"
 
+      - name: Validate Entra auth app wiring
+        env:
+          ENTRA_AUTH_CLIENT_ID: ${{ vars.ENTRA_AUTH_CLIENT_ID }}
+          AZURE_OIDC_CLIENT_ID: ${{ env.AZURE_OIDC_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          sentinel_client_id="00000000-0000-4000-8000-000000000000"
+          if [ -z "${ENTRA_AUTH_CLIENT_ID}" ]; then
+            echo "::error::Missing repository variable ENTRA_AUTH_CLIENT_ID. Container Apps Entra auth is required for PR protected-endpoint access."
+            exit 1
+          fi
+          if [ "${ENTRA_AUTH_CLIENT_ID}" = "${sentinel_client_id}" ]; then
+            echo "::error::ENTRA_AUTH_CLIENT_ID is the invalid sentinel ${sentinel_client_id} (AADSTS700016). Set it to the real Entra app registration client id."
+            exit 1
+          fi
+          if [ "${ENTRA_AUTH_CLIENT_ID}" = "${AZURE_OIDC_CLIENT_ID}" ]; then
+            echo "::error::ENTRA_AUTH_CLIENT_ID must be the runtime Entra auth app id, not the workflow OIDC id (${AZURE_OIDC_CLIENT_ID})."
+            exit 1
+          fi
+          echo "Entra auth app wiring validated."
+
       - name: azd auth login (OIDC, no stored secrets)
         run: |
           set -euo pipefail
           azd auth login \
-            --client-id "$AZURE_CLIENT_ID" \
+            --client-id "$AZURE_OIDC_CLIENT_ID" \
             --tenant-id "$AZURE_TENANT_ID" \
             --federated-credential-provider github
 
       - name: Azure CLI login (OIDC, for az group/tag/query)
         uses: Azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          client-id: ${{ env.AZURE_OIDC_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
