@@ -208,6 +208,26 @@ class SmokeTestHappyPathTests(unittest.TestCase):
         self.assertEqual(result.live.reason_code, "entra_challenge")
         self.assertEqual(result.ready.reason_code, "entra_challenge")
 
+    def test_protected_smoke_retries_early_404_then_validates_entra_challenge(self) -> None:
+        transport = ScriptedTransport(
+            live=[_resp(404), _resp(401, headers=_entra_challenge())],
+            ready=[_resp(404), _resp(401, headers=_entra_challenge())],
+        )
+        sleep = RecordingSleep()
+
+        result = smoke.run_smoke_test(
+            BASE_URL,
+            transport=transport,
+            sleep=sleep,
+            monotonic=FakeClock(step=0.0),
+            expected_entra_tenant_id=ENTRA_TENANT_ID,
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.live.attempts, 2)
+        self.assertEqual(result.ready.attempts, 2)
+        self.assertEqual(sleep.delays, [1.0, 1.0])
+
 
 class SmokeTestFailureTests(unittest.TestCase):
     def test_persistent_transient_failure_hits_deadline_and_fails(self) -> None:
@@ -290,6 +310,25 @@ class SmokeTestFailureTests(unittest.TestCase):
         self.assertEqual(result.live.attempts, smoke.WARMUP_404_MAX_ATTEMPTS + 1)
         self.assertEqual(len(sleep.delays), smoke.WARMUP_404_MAX_ATTEMPTS)
 
+    def test_protected_persistent_404_still_fails_closed_after_bounded_grace(self) -> None:
+        transport = ScriptedTransport(live=[_resp(404)])
+        sleep = RecordingSleep()
+
+        result = smoke.run_smoke_test(
+            BASE_URL,
+            deadline_seconds=100000.0,
+            transport=transport,
+            sleep=sleep,
+            monotonic=FakeClock(step=0.0),
+            expected_entra_tenant_id=ENTRA_TENANT_ID,
+        )
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.live.reason_code, "unexpected_status")
+        self.assertEqual(result.live.status_code, 404)
+        self.assertEqual(result.live.attempts, smoke.WARMUP_404_MAX_ATTEMPTS + 1)
+        self.assertEqual(len(sleep.delays), smoke.WARMUP_404_MAX_ATTEMPTS)
+
     def test_500_is_not_retried(self) -> None:
         transport = ScriptedTransport(live=[_resp(500)])
         sleep = RecordingSleep()
@@ -356,7 +395,6 @@ class SmokeTestFailureTests(unittest.TestCase):
             _resp(401),
             _resp(401, headers={"www-authenticate": 'Bearer realm="wrong"'}),
             _resp(403),
-            _resp(404),
         ):
             with self.subTest(status=response.status_code, headers=response.headers):
                 result = smoke.run_smoke_test(
