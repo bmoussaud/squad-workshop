@@ -123,6 +123,8 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
         # configure_auth must depend on deploy completing successfully
         self.assertIn("needs: [preflight, deploy]", configure_auth_job)
+        self.assertIn("if: ${{ needs.deploy.result == 'success' }}", configure_auth_job)
+        self.assertNotIn("needs.preflight.outputs.eligible", configure_auth_job)
 
     def test_resource_group_is_tagged_before_azd_provision(self) -> None:
         create_block = _step_block(self.workflow, "Create and atomically tag PR resource group")

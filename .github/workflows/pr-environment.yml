@@ -682,7 +682,7 @@ jobs:
   configure_auth:
     name: Configure trusted PR authentication
     needs: [preflight, deploy]
-    if: ${{ needs.preflight.outputs.eligible == 'true' && needs.deploy.result == 'success' }}
+    if: ${{ needs.deploy.result == 'success' }}
     runs-on: ubuntu-latest
     environment: azure-pr-app
     permissions:
