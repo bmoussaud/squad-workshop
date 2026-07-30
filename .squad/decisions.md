@@ -75,6 +75,24 @@ Setting the default to `true` is safe because placeholder OIDC credentials (`000
 **What:** `infra/scripts/pr_smoke_test.py` now treats early `/health/live` and `/health/ready` HTTP 404 responses as retryable only inside a strict warm-up envelope (max 6 attempts and <45 seconds from smoke start). Outside that envelope, 404 remains fail-fast as `unexpected_status`.
 **Why:** In PR environment deploys, ACA ingress/revision propagation can briefly route to no matching health path right after deploy/update, yielding short-lived 404 before the endpoint stabilizes to 200. Immediate fail-fast on first 404 creates false negatives that block downstream trusted auth configuration. A bounded grace preserves fail-closed behavior for persistent misroutes while absorbing startup jitter.
 
+### D-production-rg-topology: Production resource groups — one per environment plus shared
+**ID:** D-production-rg-topology
+**Decided At:** 2026-07-30T15:23:21+02:00
+**By:** Squad Coordinator
+**Status:** active
+**Supersedes:** []
+**What:** Production topology uses one resource group (g-fantasy-cards-prod) for all regional and global ARM resources (compute, storage, networking, monitoring). Cross-environment shared infrastructure (Foundry, ACR, managed identities) lives in a separate dedicated resource group (g-fantasy-cards-shared). Per-region resource groups are revisited only when independent RBAC boundaries, regulatory isolation, or much larger deployment scale justifies the complexity.
+**Why:** Project scope is small with single active region (France Central); one RG per environment minimizes governance and operational complexity and matches explicit user preference. Shared resources require separate lifecycle management, access control, and cost tracking outside environment resource groups. Revisit trigger conditions not yet met; growth to multi-region, independent regulatory requirements, or RBAC segmentation per region would prompt re-evaluation.
+
+### D-azure-env-independent-resource-groups: Independent resource groups per environment, no shared infrastructure
+**ID:** D-azure-env-independent-resource-groups
+**Decided At:** 2026-07-30T15:29:30+02:00
+**By:** Benoit Moussaud (User Directive)
+**Status:** active
+**Supersedes:** ["D-production-rg-topology"]
+**What:** Azure resource group topology now allocates one complete, independent resource group per lifecycle environment (dev, staging, production). No shared resource group (rg-fantasy-cards-shared or equivalent) exists. Every environment owns its own independent copy of all Azure resources, including container registries (ACR), Foundry/model resources, and managed identities. Cross-environment resource dependencies are explicitly prohibited unless approved by subsequent decision. Resource reorganization does not require live migration; destructive drop-and-create replacement is acceptable, subject to an explicit deployment window and verification protocol. Platform exceptions remain documented: Azure-managed resource groups (ME_* naming) continue to be managed by Azure platform lifecycle; tenant-scoped Entra ID objects (service principals, app registrations) remain shared as per platform constraints.
+**Why:** Simplification. Shared resources introduce cross-environment blast radius, separate lifecycle management requirements, shared access control complexity, and billing ambiguity. Independent environments reduce operational risk and align with explicit user preference for environment self-containment. Destructive replacement is acceptable because the project is early-stage and environment promotions do not require preserving prior artifacts. An explicit deployment window gates the operation and verification protocols confirm successful replacement.
+
 ## Legacy Compatibility
 
 Legacy import `4561565e05f4397117fc20b43fddf83059c10dab32df6209d595ddcdaef2cffa` is losslessly indexed in `decisions/archive/legacy-4561565e05f4397117fc20b43fddf83059c10dab32df6209d595ddcdaef2cffa.md`; use decision-ledger retrieval by legacy ID.
