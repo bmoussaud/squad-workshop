@@ -188,6 +188,12 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertIn("mode: 'Blocking'", policy)
         for category in ("Hate", "Sexual", "Violence", "SelfHarm"):
             self.assertEqual(policy.count(f"name: '{category}'"), 2)
+            for source in ("Prompt", "Completion"):
+                self.assertRegex(
+                    policy,
+                    rf"(?s)\{{[^{{}}]*name:\s*'{category}'"
+                    rf"[^{{}}]*source:\s*'{source}'[^{{}}]*\}}",
+                )
         self.assertEqual(policy.count("severityThreshold: 'Low'"), 8)
         self.assertEqual(policy.count("blocking: true"), 8)
         self.assertEqual(policy.count("enabled: true"), 8)
