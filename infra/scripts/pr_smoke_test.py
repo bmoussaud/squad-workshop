@@ -402,8 +402,7 @@ def _poll_endpoint(
                 path, True, outcome.status_code, attempt, outcome.reason_code, ""
             )
         if (
-            expected_entra_tenant_id is None
-            and outcome.status_code == 404
+            outcome.status_code == 404
             and not outcome.retryable
             and attempt <= WARMUP_404_MAX_ATTEMPTS
             and monotonic() < warmup_404_deadline
