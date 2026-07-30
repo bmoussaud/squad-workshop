@@ -38,6 +38,7 @@ def _load(module_name: str):
 smoke = _load("pr_smoke_test")
 
 BASE_URL = "https://ca-fc-pr14-rcl-4c32c628.example.azurecontainerapps.io"
+ENTRA_TENANT_ID = "be38c437-5790-4e3a-bb56-4811371e35ea"
 
 
 def _live_ok() -> "smoke.HttpResponse":
@@ -48,8 +49,25 @@ def _ready_ok() -> "smoke.HttpResponse":
     return smoke.HttpResponse(200, json.dumps({"status": "ready"}))
 
 
-def _resp(status: int, body: str = "") -> "smoke.HttpResponse":
-    return smoke.HttpResponse(status, body)
+def _resp(
+    status: int, body: str = "", headers: dict[str, str] | None = None
+) -> "smoke.HttpResponse":
+    return smoke.HttpResponse(status, body, headers)
+
+
+def _entra_challenge(
+    *,
+    tenant_id: str = ENTRA_TENANT_ID,
+    realm: str = "ca-fc-pr14-rcl-4c32c628.example.azurecontainerapps.io",
+    resource_id: str = "79f3354c-e4a9-4d35-be38-737f1ea4cfb6",
+) -> dict[str, str]:
+    return {
+        "www-authenticate": (
+            f'Bearer realm="{realm}" '
+            f'authorization_uri="https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize" '
+            f'resource_id="{resource_id}"'
+        )
+    }
 
 
 class ScriptedTransport:
@@ -168,6 +186,27 @@ class SmokeTestHappyPathTests(unittest.TestCase):
         self.assertTrue(result.passed)
         self.assertEqual(result.live.attempts, 2)
         self.assertEqual(sleep.delays, [1.0])
+
+    def test_expected_entra_challenge_on_both_public_health_paths_passes(self) -> None:
+        transport = ScriptedTransport(
+            live=[_resp(401, headers=_entra_challenge())],
+            ready=[_resp(401, headers=_entra_challenge())],
+        )
+
+        result = smoke.run_smoke_test(
+            BASE_URL,
+            transport=transport,
+            sleep=RecordingSleep(),
+            monotonic=FakeClock(step=0.0),
+            expected_entra_tenant_id=ENTRA_TENANT_ID,
+        )
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.reason_code, "ok")
+        self.assertEqual(result.live.status_code, 401)
+        self.assertEqual(result.ready.status_code, 401)
+        self.assertEqual(result.live.reason_code, "entra_challenge")
+        self.assertEqual(result.ready.reason_code, "entra_challenge")
 
 
 class SmokeTestFailureTests(unittest.TestCase):
@@ -312,6 +351,40 @@ class SmokeTestFailureTests(unittest.TestCase):
                 self.assertEqual(result.live.attempts, 1, status)
                 self.assertEqual(sleep.delays, [], status)
 
+    def test_arbitrary_unauthorized_or_forbidden_responses_never_pass_protected_smoke(self) -> None:
+        for response in (
+            _resp(401),
+            _resp(401, headers={"www-authenticate": 'Bearer realm="wrong"'}),
+            _resp(403),
+            _resp(404),
+        ):
+            with self.subTest(status=response.status_code, headers=response.headers):
+                result = smoke.run_smoke_test(
+                    BASE_URL,
+                    transport=ScriptedTransport(live=[response]),
+                    sleep=RecordingSleep(),
+                    monotonic=FakeClock(step=0.0),
+                    expected_entra_tenant_id=ENTRA_TENANT_ID,
+                )
+                self.assertFalse(result.passed)
+                self.assertEqual(result.live.attempts, 1)
+
+    def test_wrong_entra_tenant_or_realm_fails_protected_smoke(self) -> None:
+        for headers in (
+            _entra_challenge(tenant_id="12345678-1234-4234-8234-123456789abc"),
+            _entra_challenge(realm="different.example.com"),
+        ):
+            with self.subTest(headers=headers):
+                result = smoke.run_smoke_test(
+                    BASE_URL,
+                    transport=ScriptedTransport(live=[_resp(401, headers=headers)]),
+                    sleep=RecordingSleep(),
+                    monotonic=FakeClock(step=0.0),
+                    expected_entra_tenant_id=ENTRA_TENANT_ID,
+                )
+                self.assertFalse(result.passed)
+                self.assertEqual(result.live.reason_code, "invalid_entra_challenge")
+
     def test_200_with_wrong_body_fails_fast(self) -> None:
         transport = ScriptedTransport(
             live=[smoke.HttpResponse(200, json.dumps({"status": "not-what-we-deployed"}))]
@@ -414,6 +487,19 @@ class SmokeTestCliTests(unittest.TestCase):
         self.assertIn("reason_code=ok", stdout)
         self.assertIn("live_status=200", stdout)
         self.assertIn("ready_status=200", stdout)
+
+    def test_main_accepts_only_the_expected_entra_challenge_in_protected_mode(self) -> None:
+        transport = ScriptedTransport(
+            live=[_resp(401, headers=_entra_challenge())],
+            ready=[_resp(401, headers=_entra_challenge())],
+        )
+        code, stdout, _ = self._run_main(
+            ["--base-url", BASE_URL, "--entra-tenant-id", ENTRA_TENANT_ID], transport
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("passed=true", stdout)
+        self.assertIn("live_status=401", stdout)
+        self.assertIn("ready_status=401", stdout)
 
     def test_main_fails_with_nonzero_exit_on_bad_deploy(self) -> None:
         transport = ScriptedTransport(live=[_resp(404)])
