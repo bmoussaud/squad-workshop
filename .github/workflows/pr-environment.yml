@@ -852,7 +852,7 @@ jobs:
             --allow-insecure false \
             >/dev/null
 
-      - name: Smoke test (/health/live + /health/ready)
+      - name: Verify public Entra challenge (/health/live + /health/ready)
         id: smoke
         run: |
           set -uo pipefail
@@ -860,6 +860,7 @@ jobs:
           output="$(python3 infra/scripts/pr_smoke_test.py \
             --base-url "$APP_URL" \
             --deadline-seconds 180 \
+            --entra-tenant-id "$AZURE_TENANT_ID" \
             --format env 2>&1)"
           rc=$?
           set -e

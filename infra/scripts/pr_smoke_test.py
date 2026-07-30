@@ -4,8 +4,10 @@ Standard-library-only. This script runs in CI *after* ``azd provision`` and
 ``azd deploy`` for a per-PR Container App, before the workflow posts its PR
 comment. It polls the two health endpoints served by ``fantasy_cards.web`` --
 ``GET /health/live`` (liveness: ``200 {"status": "live"}``) and
-``GET /health/ready`` (readiness: ``200 {"status": "ready"}``) -- and emits a
-single machine-readable verdict the workflow consumes for the comment.
+``GET /health/ready`` (readiness: ``200 {"status": "ready"}``). When the
+public ingress is intentionally protected, it instead verifies that both paths
+return the configured Entra Bearer challenge. The Container App's trusted
+in-process probes continue to verify the actual health payload in that mode.
 
 Cold-start reality: a freshly deployed Container App has zero warm replicas, so
 the first probes routinely fail while a replica boots. Those *transient* early
@@ -54,6 +56,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable
+from urllib.parse import urlsplit
 
 # --- Endpoint contract (from src/fantasy_cards/web.py) ------------------------
 LIVE_PATH = "/health/live"
@@ -86,6 +89,13 @@ _EXCERPT_MAX = 120
 # character plus DEL so a crafted response can never open a fresh log line or a
 # GitHub Actions workflow command (``::error``, ``::set-output``).
 _LOG_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f]")
+_GUID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+_GUID_RE = re.compile(rf"^{_GUID_PATTERN}$", re.IGNORECASE)
+_ENTRA_AUTHORIZATION_URI_RE = re.compile(
+    rf"^https://login\.microsoftonline\.com/({_GUID_PATTERN})/oauth2/v2\.0/authorize$",
+    re.IGNORECASE,
+)
+_CHALLENGE_ATTRIBUTE_RE = re.compile(r'([a-z_]+)="([^"]*)"', re.IGNORECASE)
 
 
 def _sanitize_log(text: str) -> str:
@@ -115,10 +125,11 @@ class TransportError(Exception):
 
 @dataclass(frozen=True)
 class HttpResponse:
-    """A minimal HTTP response the poller reasons about (status + text body)."""
+    """A minimal HTTP response the poller reasons about."""
 
     status_code: int
     body: str
+    headers: dict[str, str] | None = None
 
 
 # A transport takes a fully-qualified URL and a per-request timeout in seconds
@@ -221,13 +232,17 @@ def _default_transport(url: str, timeout: float) -> HttpResponse:
     try:
         with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
             body = response.read(_MAX_BODY_BYTES)
-            return HttpResponse(int(response.status), _decode(body))
+            return HttpResponse(
+                int(response.status), _decode(body), _response_headers(response.headers)
+            )
     except urllib.error.HTTPError as error:
         try:
             body = error.read(_MAX_BODY_BYTES)
         except Exception:  # noqa: BLE001 - body is best-effort diagnostics only
             body = b""
-        return HttpResponse(int(error.code), _decode(body))
+        return HttpResponse(
+            int(error.code), _decode(body), _response_headers(error.headers)
+        )
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         reason = getattr(error, "reason", None)
         raise TransportError(str(reason) if reason is not None else str(error)) from error
@@ -237,9 +252,28 @@ def _decode(body: bytes) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def _classify(outcome: HttpResponse, expected_status: str) -> _ProbeOutcome:
+def _response_headers(headers: object) -> dict[str, str]:
+    if headers is None or not hasattr(headers, "items"):
+        return {}
+    return {
+        str(name).lower(): str(value)
+        for name, value in headers.items()  # type: ignore[union-attr]
+    }
+
+
+def _classify(
+    outcome: HttpResponse,
+    expected_status: str,
+    *,
+    expected_entra_tenant_id: str | None = None,
+    expected_realm: str | None = None,
+) -> _ProbeOutcome:
     """Turn one HTTP response into a healthy / retry / fail-fast decision."""
     status = outcome.status_code
+    if expected_entra_tenant_id is not None:
+        return _classify_entra_challenge(
+            outcome, expected_entra_tenant_id, expected_realm
+        )
     if status == 200:
         if _body_matches(outcome.body, expected_status):
             return _ProbeOutcome(True, False, 200, "ok", "")
@@ -256,6 +290,58 @@ def _classify(outcome: HttpResponse, expected_status: str) -> _ProbeOutcome:
     return _ProbeOutcome(False, False, status, "unexpected_status", f"HTTP {status}")
 
 
+def _classify_entra_challenge(
+    outcome: HttpResponse, expected_tenant_id: str, expected_realm: str | None
+) -> _ProbeOutcome:
+    if outcome.status_code != 401:
+        return _ProbeOutcome(
+            False,
+            False,
+            outcome.status_code,
+            "unexpected_status",
+            f"expected HTTP 401; got HTTP {outcome.status_code}",
+        )
+    challenge = (outcome.headers or {}).get("www-authenticate", "")
+    if not challenge.lower().startswith("bearer "):
+        return _ProbeOutcome(
+            False, False, 401, "missing_entra_challenge", "missing Bearer challenge"
+        )
+    attributes = {
+        key.lower(): value
+        for key, value in _CHALLENGE_ATTRIBUTE_RE.findall(challenge)
+    }
+    authorization_uri = attributes.get("authorization_uri", "")
+    authority_match = _ENTRA_AUTHORIZATION_URI_RE.fullmatch(authorization_uri)
+    if (
+        authority_match is None
+        or authority_match.group(1).lower() != expected_tenant_id.lower()
+    ):
+        return _ProbeOutcome(
+            False,
+            False,
+            401,
+            "invalid_entra_challenge",
+            "authorization_uri is not the configured Entra tenant",
+        )
+    if expected_realm is not None and attributes.get("realm") != expected_realm:
+        return _ProbeOutcome(
+            False,
+            False,
+            401,
+            "invalid_entra_challenge",
+            "realm does not match the probed endpoint",
+        )
+    if not _GUID_RE.fullmatch(attributes.get("resource_id", "")):
+        return _ProbeOutcome(
+            False,
+            False,
+            401,
+            "invalid_entra_challenge",
+            "resource_id is missing or invalid",
+        )
+    return _ProbeOutcome(True, False, 401, "entra_challenge", "")
+
+
 def _body_matches(body: str, expected_status: str) -> bool:
     try:
         payload = json.loads(body)
@@ -269,12 +355,19 @@ def _probe(
     expected_status: str,
     transport: Transport,
     request_timeout: float,
+    expected_entra_tenant_id: str | None,
+    expected_realm: str | None,
 ) -> _ProbeOutcome:
     try:
         response = transport(url, request_timeout)
     except TransportError as error:
         return _ProbeOutcome(False, True, None, "connection_error", _sanitize_excerpt(str(error)))
-    return _classify(response, expected_status)
+    return _classify(
+        response,
+        expected_status,
+        expected_entra_tenant_id=expected_entra_tenant_id,
+        expected_realm=expected_realm,
+    )
 
 
 def _poll_endpoint(
@@ -289,16 +382,28 @@ def _poll_endpoint(
     backoff: BackoffPolicy,
     sleep: Callable[[float], None],
     monotonic: Callable[[], float],
+    expected_entra_tenant_id: str | None = None,
+    expected_realm: str | None = None,
 ) -> EndpointResult:
     """Poll one endpoint until it is healthy, fails fast, or the deadline hits."""
     attempt = 0
     while True:
         attempt += 1
-        outcome = _probe(url, expected_status, transport, request_timeout)
+        outcome = _probe(
+            url,
+            expected_status,
+            transport,
+            request_timeout,
+            expected_entra_tenant_id,
+            expected_realm,
+        )
         if outcome.healthy:
-            return EndpointResult(path, True, outcome.status_code, attempt, "ok", "")
+            return EndpointResult(
+                path, True, outcome.status_code, attempt, outcome.reason_code, ""
+            )
         if (
-            outcome.status_code == 404
+            expected_entra_tenant_id is None
+            and outcome.status_code == 404
             and not outcome.retryable
             and attempt <= WARMUP_404_MAX_ATTEMPTS
             and monotonic() < warmup_404_deadline
@@ -338,6 +443,7 @@ def run_smoke_test(
     transport: Transport | None = None,
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
+    expected_entra_tenant_id: str | None = None,
 ) -> SmokeTestResult:
     """Run the liveness+readiness smoke test and return a single verdict.
 
@@ -351,6 +457,12 @@ def run_smoke_test(
         raise ValueError("request-timeout-seconds must be positive")
     policy = backoff if backoff is not None else BackoffPolicy()
     active_transport = transport if transport is not None else _default_transport
+    tenant_id = (
+        _validate_entra_tenant_id(expected_entra_tenant_id)
+        if expected_entra_tenant_id is not None
+        else None
+    )
+    expected_realm = urlsplit(base).netloc if tenant_id is not None else None
 
     start = monotonic()
     deadline = start + deadline_seconds
@@ -366,6 +478,8 @@ def run_smoke_test(
         backoff=policy,
         sleep=sleep,
         monotonic=monotonic,
+        expected_entra_tenant_id=tenant_id,
+        expected_realm=expected_realm,
     )
     if live.healthy:
         ready = _poll_endpoint(
@@ -379,6 +493,8 @@ def run_smoke_test(
             backoff=policy,
             sleep=sleep,
             monotonic=monotonic,
+            expected_entra_tenant_id=tenant_id,
+            expected_realm=expected_realm,
         )
     else:
         # Short-circuit: no point probing readiness if liveness never came up.
@@ -392,7 +508,11 @@ def run_smoke_test(
 
     if passed:
         reason_code = "ok"
-        message = "Smoke test passed: /health/live and /health/ready are healthy."
+        message = (
+            "Smoke test passed: /health/live and /health/ready are healthy."
+            if tenant_id is None
+            else "Smoke test passed: public health paths enforce the expected Entra challenge."
+        )
     else:
         failing = live if not live.healthy else ready
         reason_code = f"{_endpoint_label(failing.path)}_{failing.reason_code}"
@@ -424,6 +544,12 @@ def _validate_base_url(base_url: str) -> str:
     if not (trimmed.startswith("https://") or trimmed.startswith("http://")):
         raise ValueError("base-url must start with http:// or https://")
     return trimmed.rstrip("/")
+
+
+def _validate_entra_tenant_id(tenant_id: str) -> str:
+    if not _GUID_RE.fullmatch(tenant_id):
+        raise ValueError("entra-tenant-id must be a GUID")
+    return tenant_id
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -472,6 +598,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default="env",
         help="output format: env (key=value lines) or json",
     )
+    parser.add_argument(
+        "--entra-tenant-id",
+        help=(
+            "expect an anonymous HTTP 401 Bearer challenge from this Entra tenant "
+            "instead of an anonymous health payload"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -500,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
             deadline_seconds=args.deadline_seconds,
             request_timeout_seconds=args.request_timeout_seconds,
             backoff=policy,
+            expected_entra_tenant_id=args.entra_tenant_id,
         )
     except ValueError as error:
         # Configuration/usage error (bad URL or knob). base-url can be

@@ -113,7 +113,10 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
     def test_deploy_diagnostics_survive_nonzero_helper_exits(self) -> None:
         for step_name, helper in (
             ("Enforce app-tier concurrency cap", "pr_preflight.py"),
-            ("Smoke test (/health/live + /health/ready)", "pr_smoke_test.py"),
+            (
+                "Verify public Entra challenge (/health/live + /health/ready)",
+                "pr_smoke_test.py",
+            ),
         ):
             with self.subTest(step=step_name):
                 block = _step_block(self.workflow, step_name)
@@ -128,9 +131,15 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         # previously had smoke inside the deploy job. This assertion ensures the step is
         # absent from deploy and present only in configure_auth.
         deploy_job = _job_block(self.workflow, "deploy")
-        self.assertNotIn("Smoke test (/health/live + /health/ready)", deploy_job)
+        self.assertNotIn(
+            "Verify public Entra challenge (/health/live + /health/ready)", deploy_job
+        )
         configure_auth_job = _job_block(self.workflow, "configure_auth")
-        self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
+        smoke = _step_block(
+            self.workflow,
+            "Verify public Entra challenge (/health/live + /health/ready)",
+        )
+        self.assertIn("--entra-tenant-id \"$AZURE_TENANT_ID\"", smoke)
         # configure_auth must depend on deploy completing successfully
         self.assertIn("needs: [preflight, deploy]", configure_auth_job)
         configure_auth_if = _normalized_job_if(configure_auth_job)
