@@ -217,6 +217,15 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
             self.workflow,
             "Install trusted authentication configuration and open ingress",
         )
+        endpoint = _step_block(self.workflow, "Resolve app URL")
+        self.assertIn(
+            'app_name="$(azd env get-value AZURE_CONTAINER_APP_NAME)"', endpoint
+        )
+        self.assertIn('echo "app_name=${app_name}" >> "$GITHUB_OUTPUT"', endpoint)
+        self.assertIn("app_name: ${{ steps.endpoint.outputs.app_name }}", deploy)
+        self.assertIn("APP_NAME: ${{ needs.deploy.outputs.app_name }}", configure)
+        self.assertNotIn("az containerapp list", configure_runtime)
+        self.assertIn('--name "$APP_NAME"', configure_runtime)
         self.assertIn("az containerapp secret set", configure_runtime)
         self.assertIn("az containerapp ingress enable", configure_runtime)
         self.assertLess(
