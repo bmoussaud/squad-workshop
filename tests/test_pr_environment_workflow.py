@@ -31,6 +31,16 @@ def _job_block(source: str, job_name: str) -> str:
     return match.group("body")
 
 
+def _normalized_job_if(job_block: str) -> str:
+    match = re.search(
+        r"(?m)^    if: >-\n(?P<expression>(?:      .*(?:\n|\Z))+)",
+        job_block,
+    )
+    if match is None:
+        raise AssertionError("Missing folded job-level if expression")
+    return " ".join(match.group("expression").split())
+
+
 class PrEnvironmentWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -123,7 +133,20 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
         # configure_auth must depend on deploy completing successfully
         self.assertIn("needs: [preflight, deploy]", configure_auth_job)
-        self.assertIn("if: ${{ needs.deploy.result == 'success' }}", configure_auth_job)
+        configure_auth_if = _normalized_job_if(configure_auth_job)
+        self.assertNotIn(
+            "||",
+            configure_auth_if,
+            "configure_auth must not let any trusted-context guard bypass the others",
+        )
+        self.assertEqual(
+            configure_auth_if,
+            "always() && "
+            "github.event.pull_request.head.repo.fork == false && "
+            "github.event.pull_request.head.repo.full_name == github.repository && "
+            "github.event.pull_request.draft == false && "
+            "needs.deploy.result == 'success'",
+        )
         self.assertNotIn("needs.preflight.outputs.eligible", configure_auth_job)
 
     def test_resource_group_is_tagged_before_azd_provision(self) -> None:
