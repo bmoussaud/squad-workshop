@@ -205,11 +205,12 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         self.assertNotIn("graph.microsoft.com", deploy)
         self.assertIn("runs-on: ubuntu-latest", configure)
         self.assertIn(
-            "ref: ${{ github.event.pull_request.base.sha }}\n"
+            "ref: ${{ github.sha }}\n"
             "          persist-credentials: false",
             configure,
         )
         self.assertNotIn("github.event.pull_request.head.sha", configure)
+        self.assertNotIn("github.event.pull_request.base.sha", configure)
         self.assertIn("secrets.ENTRA_AUTOMATION_CREDENTIALS", configure)
 
         create = _step_block(self.workflow, "Create or rotate the PR OIDC application")
