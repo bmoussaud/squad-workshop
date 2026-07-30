@@ -121,9 +121,19 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
             with self.subTest(step=step_name):
                 block = _step_block(self.workflow, step_name)
                 self.assertIn(f"set +e\n          output=\"$(python3 infra/scripts/{helper}", block)
-                self.assertIn("--format env 2>&1)\"", block)
                 self.assertIn("rc=$?\n          set -e", block)
                 self.assertIn("printf '%s\\n' \"$output\"", block)
+
+    def test_smoke_diagnostics_never_reach_github_output(self) -> None:
+        smoke = _step_block(
+            self.workflow, "Verify public Entra challenge (/health/live + /health/ready)"
+        )
+        self.assertNotIn("2>&1", smoke)
+        failure_guard = 'if [ "$rc" -ne 0 ]; then\n            exit "$rc"\n          fi'
+        output_write = 'printf \'%s\\n\' "$output" >> "$GITHUB_OUTPUT"'
+        self.assertIn(failure_guard, smoke)
+        self.assertIn(output_write, smoke)
+        self.assertLess(smoke.index(failure_guard), smoke.index(output_write))
 
     def test_smoke_test_runs_only_after_trusted_auth_is_configured(self) -> None:
         # Smoke must not fire before configure_auth opens ingress and installs real OIDC

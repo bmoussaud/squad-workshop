@@ -861,12 +861,14 @@ jobs:
             --base-url "$APP_URL" \
             --deadline-seconds 180 \
             --entra-tenant-id "$AZURE_TENANT_ID" \
-            --format env 2>&1)"
+            --format env)"
           rc=$?
           set -e
           printf '%s\n' "$output"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
           printf '%s\n' "$output" >> "$GITHUB_OUTPUT"
-          exit $rc
 
       - name: Directory automation login for credential cleanup
         if: ${{ success() }}
