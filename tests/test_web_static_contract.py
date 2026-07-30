@@ -112,7 +112,7 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertRegex(compact, r"@media\s*\(max-width:")
         self.assertRegex(compact, r"min-height\s*:\s*(?:44px|48px|2\.75rem|3rem)")
 
-    def test_css_centralizes_green_background_palette(self) -> None:
+    def test_css_uses_semantic_surface_and_interaction_tokens(self) -> None:
         from fastapi.testclient import TestClient
         from fantasy_cards.web import create_app
 
@@ -125,38 +125,33 @@ class WebStaticContractTests(unittest.TestCase):
                 ).group("path")
                 css = client.get(stylesheet_path).text.lower()
 
-        self.assertIn("--paper: #e4f1df;", css)
-        self.assertIn("--surface: #f7fcf4;", css)
-        self.assertIn("--muted: #556052;", css)
-        self.assertIn("--coral: #9e3a31;", css)
-        self.assertIn("--gold: #7a5d16;", css)
-        self.assertIn("--line: #697564;", css)
-        self.assertIn("background: var(--paper);", css)
-        self.assertIn("background-color: var(--paper);", css)
-        self.assertIn("background: rgba(228, 241, 223, 0.96);", css)
-        self.assertIn("background: #d8ecd2;", css)
-        outdated_paper = "#" + "f7" + "f3" + "e8"
-        outdated_masthead = "rgba(" + ", ".join(("247", "243", "232"))
-        self.assertNotIn(outdated_paper, css)
-        self.assertNotIn(outdated_masthead, css)
+        for token in (
+            "--canvas:",
+            "--surface:",
+            "--surface-subtle:",
+            "--border:",
+            "--accent:",
+            "--accent-strong:",
+            "--focus:",
+            "--danger:",
+            "--success:",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, css)
+        self.assertIn("background: linear-gradient(", css)
+        self.assertNotIn("data:image/svg+xml", css)
 
-    def test_green_palette_preserves_text_and_ui_contrast(self) -> None:
-        backgrounds = {
-            "paper": "#e4f1df",
-            "surface": "#f7fcf4",
-            "result": "#d8ecd2",
-        }
+    def test_visual_tokens_preserve_text_and_ui_contrast(self) -> None:
+        backgrounds = {"canvas": "#f7f9fc", "surface": "#ffffff"}
         normal_text = {
-            "ink": "#17251d",
-            "muted": "#556052",
-            "coral": "#9e3a31",
-            "gold": "#7a5d16",
+            "ink": "#172033",
+            "muted": "#4b5565",
         }
         ui_components = {
-            "line": "#697564",
-            "focus": "#0b6c88",
-            "forest": "#24513a",
-            "forest-deep": "#173a29",
+            "focus": "#0b63ce",
+            "accent": "#2f5be7",
+            "success": "#157347",
+            "danger": "#b42318",
         }
 
         for background_name, background in backgrounds.items():
@@ -192,6 +187,7 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn("fetch(", script)
         self.assertIn("disabled", script)
         self.assertTrue("aria-busy" in script or "aria-live" in html.lower())
+        self.assertIn("prefers-reduced-motion: reduce", script)
         self.assertNotIn("window.location", script)
 
 

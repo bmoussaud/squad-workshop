@@ -51,7 +51,10 @@ if (form && statusRegion && resultRegion) {
       }
       showResult(payload, title);
       statusRegion.textContent = "Card generated successfully.";
-      resultRegion.scrollIntoView({ behavior: "smooth", block: "start" });
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      resultRegion.scrollIntoView({ behavior, block: "start" });
     } catch (error) {
       statusRegion.textContent = error instanceof Error ? error.message : "The card could not be generated.";
     } finally {
