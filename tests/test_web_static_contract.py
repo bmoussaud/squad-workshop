@@ -142,33 +142,94 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertNotIn("data:image/svg+xml", css)
 
     def test_visual_tokens_preserve_text_and_ui_contrast(self) -> None:
-        backgrounds = {"canvas": "#f7f9fc", "surface": "#ffffff"}
-        normal_text = {
-            "ink": "#172033",
-            "muted": "#4b5565",
-        }
-        ui_components = {
-            "focus": "#0b63ce",
-            "accent": "#2f5be7",
-            "success": "#157347",
-            "danger": "#b42318",
-        }
+        from fastapi.testclient import TestClient
+        from fantasy_cards.web import create_app
 
-        for background_name, background in backgrounds.items():
-            for foreground_name, foreground in normal_text.items():
-                with self.subTest(
-                    background=background_name, foreground=foreground_name
-                ):
-                    self.assertGreaterEqual(
-                        _contrast_ratio(foreground, background), 4.5
-                    )
-            for foreground_name, foreground in ui_components.items():
-                with self.subTest(
-                    background=background_name, foreground=foreground_name
-                ):
-                    self.assertGreaterEqual(
-                        _contrast_ratio(foreground, background), 3.0
-                    )
+        with patch.dict(os.environ, self.environment, clear=True):
+            with TestClient(create_app()) as client:
+                self.authenticate(client)
+                html = client.get("/").text
+                stylesheet_path = re.search(
+                    r'href="(?P<path>/static/[^"]+\.css)"', html
+                ).group("path")
+                stylesheet = client.get(stylesheet_path)
+
+        self.assertEqual(stylesheet.status_code, 200)
+        root = re.search(
+            r":root\s*\{(?P<declarations>.*?)\}", stylesheet.text, re.DOTALL
+        )
+        self.assertIsNotNone(root, "served stylesheet must declare :root design tokens")
+        declared_tokens = dict(
+            re.findall(
+                r"(?m)^\s*(--[a-z-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;",
+                root.group("declarations"),
+            )
+        )
+        expected_tokens = {
+            "--ink": "#172033",
+            "--muted": "#4b5565",
+            "--canvas": "#f7f9fc",
+            "--surface": "#ffffff",
+            "--surface-subtle": "#f1f5f9",
+            "--accent": "#2f5be7",
+            "--accent-strong": "#2448b8",
+            "--accent-subtle": "#e8efff",
+            "--success": "#157347",
+            "--danger": "#b42318",
+            "--focus": "#0b63ce",
+        }
+        for token, expected_value in expected_tokens.items():
+            with self.subTest(token=token):
+                self.assertEqual(declared_tokens.get(token), expected_value)
+
+        result_gradient = re.search(
+            r"background\s*:\s*linear-gradient\(\s*145deg\s*,\s*"
+            r"var\((--[a-z-]+)\)\s+0%\s*,\s*"
+            r"var\((--[a-z-]+)\)\s+100%\s*\)",
+            stylesheet.text,
+        )
+        self.assertIsNotNone(
+            result_gradient, "result surface must retain its token-based gradient"
+        )
+        self.assertEqual(
+            result_gradient.groups(), ("--surface", "--accent-subtle")
+        )
+        _, result_surface_end = result_gradient.groups()
+
+        text_pairs = (
+            ("--ink", "--canvas"),
+            ("--ink", "--surface"),
+            ("--ink", result_surface_end),
+            ("--muted", "--canvas"),
+            ("--muted", "--surface"),
+            ("--muted", "--surface-subtle"),
+            ("--muted", result_surface_end),
+            ("--accent-strong", "--surface"),
+            ("--success", result_surface_end),
+            ("--danger", "--surface"),
+        )
+        ui_pairs = (
+            ("--accent", "--surface"),
+            ("--accent", result_surface_end),
+            ("--focus", "--surface"),
+            ("--focus", result_surface_end),
+        )
+        for foreground, background in text_pairs:
+            with self.subTest(foreground=foreground, background=background):
+                self.assertGreaterEqual(
+                    _contrast_ratio(
+                        declared_tokens[foreground], declared_tokens[background]
+                    ),
+                    4.5,
+                )
+        for foreground, background in ui_pairs:
+            with self.subTest(foreground=foreground, background=background):
+                self.assertGreaterEqual(
+                    _contrast_ratio(
+                        declared_tokens[foreground], declared_tokens[background]
+                    ),
+                    3.0,
+                )
 
     def test_javascript_is_progressive_enhancement_not_required_navigation(self) -> None:
         from fastapi.testclient import TestClient
