@@ -232,6 +232,7 @@ jobs:
     outputs:
       environment_name: ${{ steps.names.outputs.environment_name }}
       app_url: ${{ steps.endpoint.outputs.app_url }}
+      app_name: ${{ steps.endpoint.outputs.app_name }}
       expires_at: ${{ steps.tags.outputs.expires_at }}
     env:
       AZURE_OIDC_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -655,16 +656,15 @@ jobs:
         id: endpoint
         run: |
           set -euo pipefail
-          # azd-service-name:'web' is on the PRIVATE container app (web.bicep), so
-          # `azd deploy` only pushes our image there; the public app keeps the
-          # helloworld image and has no /health endpoints. Resolve the URL from the
-          # canonical azd output for the deployed service instead of querying an app
-          # by name. SERVICE_WEB_URI is ALREADY a full https://<fqdn>
-          # (main.bicep -> web.bicep serviceUri), so do NOT prepend a scheme.
+          # The azd service is the VNet-connected private app. Its ingress starts
+          # closed, so SERVICE_WEB_URI is the deterministic eventual external
+          # address rather than the initial *.internal FQDN. The trusted auth job
+          # receives this same app name and must never choose an app by tag order.
           # An empty-but-successful get-value must fail loudly HERE, not silently
           # flow into the smoke test as a confusing far-from-the-cause failure;
           # `set -euo pipefail` alone does not catch empty-but-zero-exit.
           app_url="$(azd env get-value SERVICE_WEB_URI)"
+          app_name="$(azd env get-value AZURE_CONTAINER_APP_NAME)"
           case "$app_url" in
             https://*)
               ;;
@@ -673,7 +673,16 @@ jobs:
               exit 1
               ;;
           esac
+          case "$app_name" in
+            ca-*)
+              ;;
+            *)
+              echo "::error::Resolved Container App name is empty or invalid; refusing to configure an unknown app."
+              exit 1
+              ;;
+          esac
           echo "app_url=${app_url}" >> "$GITHUB_OUTPUT"
+          echo "app_name=${app_name}" >> "$GITHUB_OUTPUT"
 
   # --- Trusted authentication configuration ------------------------------
   # This job intentionally starts on a fresh runner and never checks out the PR
@@ -701,6 +710,7 @@ jobs:
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       APP_URL: ${{ needs.deploy.outputs.app_url }}
+      APP_NAME: ${{ needs.deploy.outputs.app_name }}
       ENVIRONMENT_NAME: ${{ needs.deploy.outputs.environment_name }}
       OIDC_MARKER: squad-workshop-pr-${{ github.event.pull_request.number }}
       OIDC_TAG: squad-workshop-pr-auth
@@ -820,17 +830,9 @@ jobs:
         run: |
           set -euo pipefail
           resource_group="rg-${ENVIRONMENT_NAME}"
-          app_name="$(az containerapp list \
-            --resource-group "$resource_group" \
-            --query "[?tags.\"pr-number\"=='${{ github.event.pull_request.number }}'].name | [0]" \
-            --output tsv)"
-          if [ -z "$app_name" ]; then
-            echo "::error::Cannot find the provisioned PR Container App."
-            exit 1
-          fi
           az containerapp secret set \
             --resource-group "$resource_group" \
-            --name "$app_name" \
+            --name "$APP_NAME" \
             --secrets \
               oidc-client-secret="$PR_OIDC_CLIENT_SECRET" \
               session-secret-current="$PR_SESSION_SECRET_CURRENT" \
@@ -838,12 +840,12 @@ jobs:
             >/dev/null
           az containerapp update \
             --resource-group "$resource_group" \
-            --name "$app_name" \
+            --name "$APP_NAME" \
             --set-env-vars "FANTASY_CARD_OIDC_CLIENT_ID=$PR_OIDC_CLIENT_ID" \
             >/dev/null
           az containerapp ingress enable \
             --resource-group "$resource_group" \
-            --name "$app_name" \
+            --name "$APP_NAME" \
             --type external \
             --target-port 8000 \
             --transport auto \
