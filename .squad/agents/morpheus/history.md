@@ -58,3 +58,4 @@
 
 📌 Team update (2026-07-29T10:19:41+02:00): Issue #61 design synthesis incorporated Tank's finding that Entra app registration cannot be created from resource-group Bicep and per-PR FQDNs create redirect-URI churn, plus Trinity's adjacent cross-user idempotency leak in application.py:20-25 and adapters.py:535-543; these materially affect the Easy Auth recommendation and should stay explicit in architecture guidance. — decided by Squad Coordinator
 
+- 2026-07-30T11:31:20.176+02:00 private-network consolidation design: The second managed environment and app are retained migration rollback artifacts. Recommended retaining the external VNet-integrated pair and moving application rollback to Container Apps revisions. This is an unapproved design recommendation; live Azure inventory and validation are required before deletion.

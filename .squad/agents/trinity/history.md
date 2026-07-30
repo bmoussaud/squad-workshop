@@ -45,3 +45,5 @@
 - Read-only analysis found FastAPI currently returns `/api/artifacts/{uuid}` from form and JSON generation, stores artifacts without owner, and serves artifact content by UUID only.
 - Recommended secure default: bind generated artifacts to authenticated subject, require principal on generation/read, app-stream artifacts with indistinguishable 404 for absent/unauthorized, and keep anonymous mode explicit for local development only.
 - 📌 Team update (2026-07-29T10:19:41+02:00): Issue #61 design synthesis elevated app-level owner binding and fail-closed proxy work, and recorded the adjacent cross-user idempotency leak in `application.py:20-25` and `adapters.py:535-543` as a required sequencing consideration. — decided by Squad Coordinator
+
+- 2026-07-30T11:16:49.586+02:00 Azure PR-environment analysis: Traced Foundry, Blob, managed identity, Azure Monitor, and Entra OIDC settings through deployment configuration into the Python runtime. Repository tests cover configuration and adapter boundaries, but disabled live validation means deployed Azure behavior remains unproven.
