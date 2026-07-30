@@ -1,15 +1,17 @@
 ---
-updated_at: 2026-07-28T10:14:07+0200
-focus_area: Foundry Approved — Non-EU Inference Accepted, Prod Gated on Disclosure
-active_issues: [4, 17, 27, 34, 36, 37, 38]
+updated_at: 2026-07-30T09:50:34+02:00
+focus_area: Production Content Policy Gated on Foundry Verification
+active_issues: [4, 17, 27, 34, 36, 37, 38, 82, 83]
 ---
 
 # What We're Focused On
 
-The Foundry approval gate is settled, after a correction. On 2026-07-28 Benoit initially approved the `gpt-image-2` deployment for dev on the understanding that inference stayed within the EU. Tank and the Fact Checker, researching independently, both established from Microsoft documentation that this was false: the `GlobalStandard` deployment type processes inference in any Azure region where the model is deployed, including US regions. Issue #2 was reopened, corrected, and re-decided.
+Production content-policy work moved forward, but the gate changed shape. Issue #49 is closed because the application enforcement layer landed in PR #79: production traffic now has a shared pre-provider validation gate.
 
-Benoit then explicitly accepted non-EU inference processing for both dev and production. This was a deliberate, informed trade: EU-bound inference is not currently purchasable for this model, since `gpt-image-2` is not offered under `DataZoneStandard` or regional `Standard` and the live subscription exposes `GlobalStandard` only. Constraining inference to the EU would mean abandoning the model. Data at rest is unaffected and remains in France Central.
+The Foundry policy-hardening artifact is PR #82. It is separate from Tank's locked-out application-enforcement work and is in review with Rai's 🟡 Yellow assessment: no blocker on #82 itself, but production still needs live deployment/read-back evidence.
 
-Production is gated on three remaining conditions: #37 (user-facing notice), #36 (retention and deletion policy) and #38 (likeness, IP and minors policy). Issue #37 has grown teeth — the notice must now state that processing may occur outside the EU, so wording that implies EU-only handling would be factually wrong and must not ship.
+The new critical blocker is issue #83: verify the custom RAI controls against the live target Foundry resource and close Rai's remaining findings. The expected target account `fnd-fantasy-cards-dev-8f327f8c` is currently absent from the active subscription, so acceptance criterion 2 from #49 remains unmet.
 
-Separately, branch protection is still not enabled, so CI runs on every PR without gating merges. Default generation paths remain demo stubs, so live Foundry image generation is still unverified end to end.
+Branch protection is still disabled. That allowed PR #79 to merge without the Rai review gate required by its own acceptance criteria, so review requirements must be enforced outside convention before production release.
+
+The earlier production gates still matter: #37 user-facing notice, #36 retention/deletion policy, #38 likeness/IP/minors policy, and the accepted non-EU `GlobalStandard` inference risk must remain visible in any production readiness call.

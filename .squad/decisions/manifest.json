@@ -1,0 +1,522 @@
+{
+  "archives": [],
+  "legacy_imports": [
+    {
+      "archive_path": "decisions/archive/legacy-4561565e05f4397117fc20b43fddf83059c10dab32df6209d595ddcdaef2cffa.md",
+      "decisions": [
+        {
+          "byte_end": 404,
+          "byte_start": 44,
+          "heading": "2026-07-22T12:33:43+0000: Azure resource configuration",
+          "id": "L-7c8217541244db6e-1",
+          "sha256": "7c8217541244db6e12a083fee225357061d8aaab8305fa1446bc1900e5703e16",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 1082,
+          "byte_start": 404,
+          "heading": "2026-07-22T12:40:47+0000: Python application development workflow",
+          "id": "L-55017b656f03142a-2",
+          "sha256": "55017b656f03142abbf3a0e3570749124090bdc32cbd0faee866667457c91da2",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 1797,
+          "byte_start": 1082,
+          "heading": "2026-07-22T12:49:52+0000: Azure hosting, agentic platform, and identity preferences",
+          "id": "L-1ed089332c878425-3",
+          "sha256": "1ed089332c878425f1eb2762aff0f5e83bde753636f541821b3edc87fb434294",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 2240,
+          "byte_start": 1797,
+          "heading": "2026-07-22T13:28:52+0000: Azure application deployment workflow",
+          "id": "L-ee5fd9c709d0ed18-4",
+          "sha256": "ee5fd9c709d0ed1875c576c2767b573156496574c487274f37a6184dbecaec85",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 2758,
+          "byte_start": 2240,
+          "heading": "2026-07-23: Resource-group-scoped AVM-first Bicep",
+          "id": "L-55bafad8074f2619-5",
+          "sha256": "55bafad8074f261970cad6dba48d053a2785d273156f74f199fd50941f8217c5",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 3274,
+          "byte_start": 2758,
+          "heading": "2026-07-23: CLI applications load local dotenv configuration",
+          "id": "L-02ab7622a39e5457-6",
+          "sha256": "02ab7622a39e5457df8150659c037c7fb5b5efbfbe2057f79bac609ad226bef4",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 4101,
+          "byte_start": 3274,
+          "heading": "2026-07-22T13:11:01+0000: Provider-neutral modular monolith for the first vertical slice",
+          "id": "L-fcb4618f4d912b07-7",
+          "sha256": "fcb4618f4d912b07ddc72289461aaf5b9f4234fb183f5948540305bb67af8966",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 4733,
+          "byte_start": 4101,
+          "heading": "2026-07-22T13:11:01+0000: Switch rejected Trinity's first gpt-image-2 implementation",
+          "id": "L-d11ccd3078f02c59-8",
+          "sha256": "d11ccd3078f02c59c1b52985e77ca0370f7e59b64353c55f8a6fed2e77075b01",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 5376,
+          "byte_start": 4733,
+          "heading": "2026-07-22T13:11:01+0000: Switch rejected Neo's second gpt-image-2 revision",
+          "id": "L-fae52ddc7d9056b6-9",
+          "sha256": "fae52ddc7d9056b6175338d44b258221a10561f33984d4a2be7579b3c85ecd71",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 6147,
+          "byte_start": 5376,
+          "heading": "2026-07-22T13:11:01+0000: Foundry gpt-image-2 adapter contract",
+          "id": "L-3f8e0024521eac3b-10",
+          "sha256": "3f8e0024521eac3be5fb09cdde13a521b657e2fa5730378325a1746fd34a6da5",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 7039,
+          "byte_start": 6147,
+          "heading": "2026-07-22T13:11:01+0000: Switch approved Tank's final gpt-image-2 revision",
+          "id": "L-10ca411a18312039-11",
+          "sha256": "10ca411a1831203996d643cbdc45eeb9f46ce02b1b80a36bc166da1d80917f74",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 8113,
+          "byte_start": 7039,
+          "heading": "2026-07-22T13:11:01+0000: Switch approved Tank's Foundry 500 request-shape fix",
+          "id": "L-40ffdb3e62d9e37a-12",
+          "sha256": "40ffdb3e62d9e37ac2cbb49141f765bbeeb7d5eda3337ced792a28d16c75beac",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 8824,
+          "byte_start": 8113,
+          "heading": "2026-07-22T13:11:01+0000: Switch rejected Trinity's artifact persistence revision",
+          "id": "L-ff984ce943ac832f-13",
+          "sha256": "ff984ce943ac832f93e422e7a32892e542f827d34d0078f3e51938f99714e7f7",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 9759,
+          "byte_start": 8824,
+          "heading": "2026-07-22T13:11:01+0000: Switch approved Tank's artifact persistence revision",
+          "id": "L-cfdb4bd02074da5d-14",
+          "sha256": "cfdb4bd02074da5dfc405035f05057e189f86e8e232b12871316e3bb0daadab7",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 10844,
+          "byte_start": 9759,
+          "heading": "2026-07-22T16:01:59+0000: Foundry provisioning prepared and awaiting explicit approval",
+          "id": "L-56c9d5ca41862054-15",
+          "sha256": "56c9d5ca41862054e56f6c3b8ea405fdc8ed583fb99ba3f0d6d3b838b1f4a4b5",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 12587,
+          "byte_start": 10844,
+          "heading": "2026-07-23T08:27:28+0000: Policy-compliant private Blob recovery supersedes public-endpoint repair (consolidated)",
+          "id": "L-09de7acde37df5a7-16",
+          "sha256": "09de7acde37df5a737af8009b65f200dfc28a4afa4ef59d133f598586e172e23",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 13602,
+          "byte_start": 12587,
+          "heading": "2026-07-23T14:02:52+0000: Safe INFO generation lifecycle logging (consolidated)",
+          "id": "L-a97356261a5ba237-17",
+          "sha256": "a97356261a5ba23789d97d98fd3038a70ca91697b8be67c78d2d1159baed02db",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 14187,
+          "byte_start": 13602,
+          "heading": "2026-07-23T14:05:36+0000: AVM-first Bicep policy correction supersedes no-AVM directive",
+          "id": "L-2c7fba75b4405b62-18",
+          "sha256": "2c7fba75b4405b6222861d59377ac4ad001c12e4f36e6b5b2a498fb6a3ccd350",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 14967,
+          "byte_start": 14187,
+          "heading": "2026-07-27T08:47:25.103+02:00: Decouple legacy Blob role cleanup from azd deployment",
+          "id": "L-cdc7f23b6f68b2f1-19",
+          "sha256": "cdc7f23b6f68b2f13e1e653bdf602191b6959ae52f706c4d0c703f465ee86e96",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 15675,
+          "byte_start": 14967,
+          "heading": "2026-07-27T08:47:25.103+02:00: Postprovision Azure CLI portability and failure policy",
+          "id": "L-de1e7a64199202b9-20",
+          "sha256": "de1e7a64199202b97c4e24891e63cb762f47915667e362da66e8feaac5b9e867",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 16325,
+          "byte_start": 15675,
+          "heading": "2026-07-27T08:47:25.103+02:00: Private app azd deployment target",
+          "id": "L-b2fed91d93886977-21",
+          "sha256": "b2fed91d9388697791018113c4528c9dac62b11f2887b3c0892e96f2eb6b6e4c",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 16871,
+          "byte_start": 16325,
+          "heading": "2026-07-27T08:47:25.103+02:00: Private Container App naming",
+          "id": "L-593d978487fc797b-22",
+          "sha256": "593d978487fc797b6d27239cf256d9e5a0932adbe249c4cdbaeffb85d935a571",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 17492,
+          "byte_start": 16871,
+          "heading": "2026-07-27T08:47:25.103+02:00: Card-layout visual contract for issue #11",
+          "id": "L-d0ff1ba00afcfdc1-23",
+          "sha256": "d0ff1ba00afcfdc162dba9a18d50309b4d1268c630edaffe62c24b4cc99502f0",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 18809,
+          "byte_start": 17492,
+          "heading": "2026-07-27T14:24:13+02:00: PR-environment Phase 1 deterministic naming contract (#16) (consolidated)",
+          "id": "L-d69bb682006c3665-24",
+          "sha256": "d69bb682006c36654ab699fa7cef247d0e49d7f0d2341bd6619dd5d020351e7b",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 19736,
+          "byte_start": 18809,
+          "heading": "2026-07-27T14:24:13+02:00: PR-environment Bicep naming seam assigned to Phase 3 (#15)",
+          "id": "L-7b0f78c3a8a05c87-25",
+          "sha256": "7b0f78c3a8a05c8753da26629734c1ab82e08a8eb2122d7f3fe23a2ec01f4112",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 20704,
+          "byte_start": 19736,
+          "heading": "2026-07-27T14:24:13+02:00: PR preflight credential and Foundry safety gates (#16) (consolidated)",
+          "id": "L-92a3a4c161c43a06-26",
+          "sha256": "92a3a4c161c43a06c9702951d555d9af0b8864c912308b9c254a1fbb3037ce7b",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 21304,
+          "byte_start": 20704,
+          "heading": "2026-07-27T14:24:13+02:00: Reviewer rejection protocol completed for #16 preflight",
+          "id": "L-dacbeaa7f82b1def-27",
+          "sha256": "dacbeaa7f82b1def2d13f735ba7bc0f05c1a0ee8fbfc55e0c168b7c2fb9b9a28",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 23513,
+          "byte_start": 21304,
+          "heading": "2026-07-27T09:42:54.356+02:00: Per-PR ephemeral Azure environments (consolidated)",
+          "id": "L-a3038e74d5b1fca2-28",
+          "sha256": "a3038e74d5b1fca220498f0e1252ab5ed328af476f2984cbc89de9e1e293d84b",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 24823,
+          "byte_start": 23513,
+          "heading": "2026-07-27T14:44:52+02:00: fix/9 relevance review",
+          "id": "L-0d2f6906adc22ced-29",
+          "sha256": "0d2f6906adc22ced0ea31e2b4d06128604e0ead6008eede42a0f4e4086453999",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 25579,
+          "byte_start": 24823,
+          "heading": "2026-07-27T14:44:52+02:00: Verify squash-merged branch trees before merge cleanup",
+          "id": "L-4ecf9be0470aed4d-30",
+          "sha256": "4ecf9be0470aed4d459285664b98c376ab0b861db8abae5e35017179c1212e9b",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 26838,
+          "byte_start": 25579,
+          "heading": "2026-07-27T16:58:24.269+02:00: Relax CI ownership gate \u2014 branch name is convention, issue-closure stays a hard gate",
+          "id": "L-4a259b6616cc7d7f-31",
+          "sha256": "4a259b6616cc7d7f660a4efb174ba399a61f268934e797eb5a30f00e23d686b3",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 29280,
+          "byte_start": 26838,
+          "heading": "2026-07-27T17:14:24.871+02:00: PR-environment Bicep name parameterization contract (#15, work item A)",
+          "id": "L-cc56b9fd4d9e488c-32",
+          "sha256": "cc56b9fd4d9e488ceb3f1ff95caa01fe12d9029e23ddbd17192ecd7fcd0ee306",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 30783,
+          "byte_start": 29280,
+          "heading": "2026-07-27T17:14:24.871+02:00: PR smoke-test script retry contract (#15, item C)",
+          "id": "L-8c290bec373a5ca6-33",
+          "sha256": "8c290bec373a5ca60921c52a5e0053fb30e9553cbfd1a5ec430d323557319e88",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 33270,
+          "byte_start": 30783,
+          "heading": "2026-07-27T20:05:43+02:00: Phase 3 PR-environment seam review \u2014 APPROVE WITH CHANGES (#15)",
+          "id": "L-4da5f3da39091d96-34",
+          "sha256": "4da5f3da39091d96af3bd770ab867f59d8201cbf22867d03ff5a11ad6756601f",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 34900,
+          "byte_start": 33270,
+          "heading": "2026-07-27T20:04:31+02:00: Switch \u2014 Phase 3 (#15) test-quality review: APPROVE WITH CHANGES",
+          "id": "L-e85afd48b10e4f27-35",
+          "sha256": "e85afd48b10e4f2768807e4d10f0b83ff2314ad0cc85680fd444943a68f6e26a",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 36642,
+          "byte_start": 34900,
+          "heading": "2026-07-27: PR-environment URL resolution and smoke-failure comment surfacing (#15, fix pass)",
+          "id": "L-e02a6e12ddff34a1-36",
+          "sha256": "e02a6e12ddff34a121cb47a7d8365a8b7e6795a6118b9b7d9607d4536241de51",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 38269,
+          "byte_start": 36642,
+          "heading": "2026-07-27T21:07:06+02:00: TTL reaper decision engine (Phase 4, #20, item B)",
+          "id": "L-a8161a09ca65e883-37",
+          "sha256": "a8161a09ca65e8839cf84cfdf80cd5d6ad479062efe1517a522a457ce1dcfa87",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 40352,
+          "byte_start": 38269,
+          "heading": "2026-07-27T21:04:25+02:00: PR-env close-time teardown + daily TTL janitor (Phase 4, #20, item A)",
+          "id": "L-c48c7774dc6c39d5-38",
+          "sha256": "c48c7774dc6c39d5fb45c8a8b142d3049eb043f7b2c657b8959e07d08dcefeb6",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 41784,
+          "byte_start": 40352,
+          "heading": "2026-07-27: Phase 4 teardown/janitor security review \u2014 \ud83d\udfe2 GREEN (#20)",
+          "id": "L-ca726e9edd6e270a-39",
+          "sha256": "ca726e9edd6e270a375ac0ddf09ff194e4d50ac50170c371d95d8ed0997e1fb5",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 43027,
+          "byte_start": 41784,
+          "heading": "2026-07-27: Phase 4 TTL reaper test review \u2014 APPROVE WITH CHANGES (#20)",
+          "id": "L-2bff0068a2ac4f87-40",
+          "sha256": "2bff0068a2ac4f873f9e38b8e684ecc8b37899e64641ef1feef522177c7d667a",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 44327,
+          "byte_start": 43027,
+          "heading": "2026-07-27: Teardown must fail loudly on query failure, not report a false no-op (#20)",
+          "id": "L-6d1ed81525b0f146-41",
+          "sha256": "6d1ed81525b0f146094c828ea1acb0fae0f3ee685dd966f0e9d13180c4fd28ac",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 45337,
+          "byte_start": 44327,
+          "heading": "2026-07-27: Azure OIDC federation and repo configuration for per-PR environments (#29)",
+          "id": "L-570942aca0579408-42",
+          "sha256": "570942aca0579408a1a9d7055891585aa8effd76309e5bb9a48cab7b79b91796",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 46962,
+          "byte_start": 45337,
+          "heading": "2026-07-28T08:22:20+02:00: Phase 5 per-PR cost tagging and observability (#18) (consolidated)",
+          "id": "L-a62a4f95ab7c7e61-43",
+          "sha256": "a62a4f95ab7c7e6182e86f06976f17b88fd246f3302547fe0bdc5a66f3f55c79",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 50843,
+          "byte_start": 46962,
+          "heading": "2026-07-28T09:03:21Z: Phase 6 Foundry exception gate and live validation contract (#17) (consolidated)",
+          "id": "L-8dd33f1b869847e9-44",
+          "sha256": "8dd33f1b869847e9b48b7bfe123ed8358dba497a7a37ef8cf0642f4ec082a812",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 51364,
+          "byte_start": 50843,
+          "heading": "2026-07-28: Keep PR-environment branch convention, surface blocked diagnostics",
+          "id": "L-8c7e396ccc91e4c6-45",
+          "sha256": "8c7e396ccc91e4c6031f31f8f864ddb249c955d922857e9d64b1ca05518b07fc",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 52520,
+          "byte_start": 51364,
+          "heading": "2026-07-28T12:01:41+02:00: PR Azure OIDC subject must use immutable owner/repository IDs (consolidated)",
+          "id": "L-a895123be1a9a43a-46",
+          "sha256": "a895123be1a9a43abac6d358233d94799300ae1cc21b99d919ca083a82a1fb5a",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 53178,
+          "byte_start": 52520,
+          "heading": "2026-07-28T09:55:56+02:00: Dev Azure infrastructure deployment state corrected",
+          "id": "L-fa0b00b830625b76-47",
+          "sha256": "fa0b00b830625b76d885629f7676aa8d5dc8f205a07e8d2b667aca49ba4b8c10",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 53739,
+          "byte_start": 53178,
+          "heading": "2026-07-28T09:55:56+02:00: CI exists but branch protection is not enabled",
+          "id": "L-d696cc3044665c8a-48",
+          "sha256": "d696cc3044665c8a63de9feef8a71af389e153460e0d2c638896c21582cc9164",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 55369,
+          "byte_start": 53739,
+          "heading": "2026-07-28T10:05:06+02:00: Foundry approval gate closed for development only (#2) \u2014 SUPERSEDED by 2026-07-28T10:14:07+02:00 re-decision",
+          "id": "L-71fa88a1c567bf8a-49",
+          "sha256": "71fa88a1c567bf8a91a885b0af6bdc95cd86aa916bd7aabddcf482d41e22b9c0",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 56221,
+          "byte_start": 55369,
+          "heading": "2026-07-28: GlobalStandard is not EU-bound for Foundry inference",
+          "id": "L-0015a8b01a39e085-50",
+          "sha256": "0015a8b01a39e08555dcf9b125711d7111aeff2907117d3dbc7b57dbcc145486",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 60040,
+          "byte_start": 56221,
+          "heading": "2026-07-28T10:14:07+02:00: GlobalStandard routing correction and Foundry re-decision (#39, #2)",
+          "id": "L-5076bdbfb66d687b-51",
+          "sha256": "5076bdbfb66d687b0df16ff12b8aad01fe23f760f8338fb9f9d3c27512b0d273",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 60955,
+          "byte_start": 60040,
+          "heading": "2026-07-28T10:14:07+02:00: Parallel uncorrelated verification for governance facts",
+          "id": "L-33cc1e042ffdb2e3-52",
+          "sha256": "33cc1e042ffdb2e367470d39af9eb7b5b161c690658fbdd87d103abf51ba8cd3",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 62034,
+          "byte_start": 60955,
+          "heading": "2026-07-28T11:41:20+02:00: Issue #41 accessible green palette revision",
+          "id": "L-74f9e34ad17b7b14-53",
+          "sha256": "74f9e34ad17b7b14ca91a9c1cf027a253e9f7c6196412a9429f4fc6c57040cc4",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 62688,
+          "byte_start": 62034,
+          "heading": "2026-07-28T11:36:33+02:00: Switch rejected issue #41 green-background revision",
+          "id": "L-33c81cf43902880a-54",
+          "sha256": "33c81cf43902880a4962a809f240acc239b6d714a333cd58b58059d5640678da",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 63148,
+          "byte_start": 62688,
+          "heading": "2026-07-28: Green background palette for issue #41",
+          "id": "L-0aaae5c7b73c71b3-55",
+          "sha256": "0aaae5c7b73c71b35e0372ebf94ba52d3ea1401ceb6500a63a2e3cef7b164fd9",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 63769,
+          "byte_start": 63148,
+          "heading": "2026-07-28: PR environments use Consumption profile without dedicated capacity bounds",
+          "id": "L-5701b1e93bc7aa82-56",
+          "sha256": "5701b1e93bc7aa827843d467cbd6e79c32cbb8e6dd9dc42c9e2327114027d77c",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 64524,
+          "byte_start": 63769,
+          "heading": "2026-07-28: Bound PR AZURE_ENV_NAME for ARM deployment-name safety",
+          "id": "L-004241804519d47f-57",
+          "sha256": "004241804519d47f0acf48a41b16df3c2483d7ce5b90c33af78cdde7b778ffd1",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 65387,
+          "byte_start": 64524,
+          "heading": "2026-07-28: Compact PR nested deployment names",
+          "id": "L-570b8e5623f6c35c-58",
+          "sha256": "570b8e5623f6c35c9f6a9d0be3b3185c43ac4535c239372f29e0169776d3e44d",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 65929,
+          "byte_start": 65387,
+          "heading": "2026-07-28: Add immutable GitHub OIDC credential for PR Azure environment",
+          "id": "L-cc7b7e9a2bde3d95-59",
+          "sha256": "cc7b7e9a2bde3d957baa82e425333b54400643f1d581d5c97b6100af4f9d972d",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 66525,
+          "byte_start": 65929,
+          "heading": "2026-07-28T17:36:00+02:00: Markdown-aware PR ownership references",
+          "id": "L-018bc5a5347242bb-60",
+          "sha256": "018bc5a5347242bb9eef55787501bdf38b2f02e5ffc3b54724dc4a21bb5b3f92",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 68071,
+          "byte_start": 66525,
+          "heading": "2026-07-28T22:16:40+02:00: PR environment cap forensic correction and issue authority",
+          "id": "L-d4dc5e8852f42782-61",
+          "sha256": "d4dc5e8852f427826219ec6e5f88d97468ee8a0f8a94ea161c1f592c9f274f59",
+          "status": "legacy-unclassified"
+        },
+        {
+          "byte_end": 69103,
+          "byte_start": 68071,
+          "heading": "2026-07-28T22:16:40+02:00: Decisions archive gate diagnosis corrected",
+          "id": "L-8a6a2a96bbded86b-62",
+          "sha256": "8a6a2a96bbded86bb2ced62d77f6e2b06751c6888314c97d506db9e6a9d68123",
+          "status": "legacy-unclassified"
+        }
+      ],
+      "source_sha256": "4561565e05f4397117fc20b43fddf83059c10dab32df6209d595ddcdaef2cffa"
+    }
+  ],
+  "quarantine": [
+    {
+      "inbox_file": "switch-content-policy-contract.md",
+      "path": "decisions/quarantine/e84d73692b21a32fef753efacf45c4f5e9fc9af621a3eec46b6c579583f8d16f.md",
+      "reason": "decision must begin with a level-3 heading",
+      "sha256": "e84d73692b21a32fef753efacf45c4f5e9fc9af621a3eec46b6c579583f8d16f"
+    },
+    {
+      "inbox_file": "tank-untagged-pr-orphan-safety.md",
+      "path": "decisions/quarantine/d7a7f5924d2a9c3308f440b78ad740b7081060f20ab0428bb8a429bb57984898.md",
+      "reason": "missing required field(s): ID, Decided At, Status, Supersedes",
+      "sha256": "d7a7f5924d2a9c3308f440b78ad740b7081060f20ab0428bb8a429bb57984898"
+    }
+  ],
+  "version": 2
+}
