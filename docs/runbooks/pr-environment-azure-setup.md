@@ -121,7 +121,6 @@ These are variables because none is sensitive and the workflows read `vars.*`.
 | `SHARED_MODEL_DEPLOYMENT_NAME`                  | `gpt-image-2-dev`                        |
 | `AZURE_ALERT_CONTACT_EMAILS`                    | `bmoussaud@microsoft.com`                |
 | `AZURE_CLIENT_ID`                               | `<OIDC appId from step 1>`               |
-| `ENTRA_AUTH_CLIENT_ID`                          | `<ACA auth appId for user sign-in>`      |
 | `AZURE_TENANT_ID`                               | `be38c437-5790-4e3a-bb56-4811371e35ea`   |
 | `AZURE_SUBSCRIPTION_ID`                         | `9479b396-5d3e-467a-b89f-ba8400aeb7dd`   |
 | `AZURE_LOCATION`                                | `swedencentral`                          |
@@ -133,8 +132,13 @@ address needs no separator. `AZURE_LOCATION` is `swedencentral` to match
 `pr-environment.yml`, so they are not repo variables.
 
 `AZURE_CLIENT_ID` is used only for workflow OIDC login (`azure/login` + `azd auth login`).
-`ENTRA_AUTH_CLIENT_ID` is a separate app registration used by Container Apps auth config
-for runtime user sign-in; do not reuse the OIDC app id here.
+PR environments explicitly disable optional Container Apps built-in auth during
+provisioning. The fresh trusted `configure_auth` job creates an isolated per-PR
+application registration with `${APP_URL}/auth/callback`, installs its credentials,
+and only then opens ingress. Missing `ENTRA_AUTH_CLIENT_ID` is therefore not a PR
+deployment failure. Long-lived environments that enable Container Apps built-in auth
+must provide its separate client ID and register
+`${APP_URL}/.auth/login/aad/callback`.
 
 ```bash
 gh variable set <NAME> --repo bmoussaud/squad-workshop --body "<value>"

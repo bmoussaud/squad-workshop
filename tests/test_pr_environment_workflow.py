@@ -207,6 +207,13 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         )
         self.assertIn("FANTASY_CARD_EXTERNAL_INGRESS=false", inputs)
         self.assertIn("provisioning-placeholder-only", inputs)
+        self.assertIn("ENABLE_CONTAINER_APPS_AUTH=false", inputs)
+        self.assertIn(
+            "trusted per-PR application OIDC is installed after provisioning", inputs
+        )
+        deploy_job = _job_block(self.workflow, "deploy")
+        self.assertNotIn("ENTRA_AUTH_CLIENT_ID", deploy_job)
+        self.assertNotIn("Validate Entra auth app wiring", deploy_job)
         configure_index = self.workflow.index("  configure_auth:")
         self.assertLess(
             self.workflow.index("- name: azd provision"),

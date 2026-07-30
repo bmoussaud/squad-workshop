@@ -372,6 +372,25 @@ class DeploymentContractTests(unittest.TestCase):
             self.assertIn("dependsOn:", block)
             self.assertIn("containerApp", block)
 
+    def test_optional_container_apps_auth_fails_closed_and_keeps_health_anonymous(
+        self,
+    ) -> None:
+        for resource_name in (
+            "containerAppAuthConfig",
+            "privateContainerAppAuthConfig",
+        ):
+            auth_config = extract_bicep_block(
+                self.web_bicep, "resource", resource_name
+            )
+            self.assertIn("if (enableContainerAppsAuth)", self.web_bicep)
+            self.assertIn("clientId: entraAuthClientId", auth_config)
+            self.assertIn(
+                "unauthenticatedClientAction: 'RedirectToLoginPage'", auth_config
+            )
+            self.assertIn("excludedPaths:", auth_config)
+            self.assertIn("'/health/live'", auth_config)
+            self.assertIn("'/health/ready'", auth_config)
+
     def test_legacy_blob_role_retirement_is_manual_maintenance(self) -> None:
         migration = self.legacy_blob_role_migration
 
