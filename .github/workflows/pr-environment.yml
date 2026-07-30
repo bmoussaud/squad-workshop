@@ -682,7 +682,12 @@ jobs:
   configure_auth:
     name: Configure trusted PR authentication
     needs: [preflight, deploy]
-    if: ${{ needs.deploy.result == 'success' }}
+    if: >-
+      always() &&
+      github.event.pull_request.head.repo.fork == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     environment: azure-pr-app
     permissions:

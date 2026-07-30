@@ -123,7 +123,14 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
         # configure_auth must depend on deploy completing successfully
         self.assertIn("needs: [preflight, deploy]", configure_auth_job)
-        self.assertIn("if: ${{ needs.deploy.result == 'success' }}", configure_auth_job)
+        self.assertIn("always()", configure_auth_job)
+        self.assertIn("github.event.pull_request.head.repo.fork == false", configure_auth_job)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name == github.repository",
+            configure_auth_job,
+        )
+        self.assertIn("github.event.pull_request.draft == false", configure_auth_job)
+        self.assertIn("needs.deploy.result == 'success'", configure_auth_job)
         self.assertNotIn("needs.preflight.outputs.eligible", configure_auth_job)
 
     def test_resource_group_is_tagged_before_azd_provision(self) -> None:
