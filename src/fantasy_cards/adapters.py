@@ -17,7 +17,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Protocol
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from PIL import Image, UnidentifiedImageError
 
@@ -70,6 +70,10 @@ _ARTIFACT_EXTENSIONS = {
 }
 _MAX_WEB_ARTIFACT_BYTES = 10 * 1024 * 1024
 _CARD_IMAGE_SIZE = "1024x1536"
+_REJECTED_AZURE_CLIENT_IDS = {
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-4000-8000-000000000000",
+}
 
 
 def build_card_prompt(title: str, description: str) -> str:
@@ -188,8 +192,9 @@ def create_foundry_client(endpoint: str, timeout_seconds: float) -> _ImagesClien
     from azure.identity import DefaultAzureCredential, get_bearer_token_provider
     from openai import OpenAI
 
+    credential_kwargs = _default_credential_kwargs()
     token_provider = get_bearer_token_provider(
-        DefaultAzureCredential(), "https://ai.azure.com/.default"
+        DefaultAzureCredential(**credential_kwargs), "https://ai.azure.com/.default"
     )
     return OpenAI(
         base_url=base_url,
@@ -532,9 +537,10 @@ class BlobArtifactStore:
             from azure.identity import DefaultAzureCredential
             from azure.storage.blob import BlobServiceClient
 
+            credential_kwargs = _default_credential_kwargs()
             self._service_client = BlobServiceClient(
                 account_url=self._account_url,
-                credential=DefaultAzureCredential(),
+                credential=DefaultAzureCredential(**credential_kwargs),
             )
         return self._service_client.get_container_client(self._container_name)
 
@@ -572,3 +578,16 @@ class InMemoryJobRepository:
 
 def deterministic_idempotency_key(title: str, prompt: str) -> str:
     return sha256(f"{title}\0{prompt}".encode()).hexdigest()
+
+
+def _default_credential_kwargs() -> dict[str, str]:
+    raw_client_id = os.getenv("AZURE_CLIENT_ID")
+    if raw_client_id is None or not raw_client_id.strip():
+        return {}
+    try:
+        client_id = str(UUID(raw_client_id.strip()))
+    except ValueError:
+        raise ValueError("AZURE_CLIENT_ID must be a valid GUID.") from None
+    if client_id in _REJECTED_AZURE_CLIENT_IDS:
+        raise ValueError("AZURE_CLIENT_ID contains a reserved GUID value.")
+    return {"managed_identity_client_id": client_id}

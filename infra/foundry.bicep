@@ -21,6 +21,10 @@ param modelName string
 param modelVersion string
 param modelSkuName string
 param modelCapacity int
+@description('Versioned custom RAI policy required for the production image deployment.')
+param raiPolicyName string = 'fantasy-cards-content-policy-v1'
+@description('Repository-managed version for the custom RAI policy configuration.')
+param raiPolicyVersion string = '1'
 
 var resolvedSharedFoundryResourceGroupName = empty(sharedFoundryResourceGroupName) ? resourceGroup().name : sharedFoundryResourceGroupName
 // Built-in role definition ID for "Cognitive Services OpenAI User" (subscriptionResourceId is stable across regions/tenants).
@@ -93,21 +97,6 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = if
     publicNetworkAccess: 'Enabled'
     restrictOutboundNetworkAccess: false
     sku: 'S0'
-    deployments: [
-      {
-        name: modelDeploymentName
-        model: {
-          format: 'OpenAI'
-          name: modelName
-          version: modelVersion
-        }
-        sku: {
-          name: modelSkuName
-          capacity: modelCapacity
-        }
-        versionUpgradeOption: 'NoAutoUpgrade'
-      }
-    ]
     diagnosticSettings: [
       {
         name: 'send-to-${logAnalyticsWorkspaceName}'
@@ -136,6 +125,99 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.15.1' = if
 
 resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = if (deployFoundry) {
   name: foundryAccountName
+}
+
+// native-bicep-fallback: The selected Cognitive Services account AVM does not expose custom RAI policy creation or deployment policy binding.
+resource contentPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10-01-preview' = if (deployFoundry) {
+  parent: foundryAccountResource
+  name: raiPolicyName
+  properties: {
+    basePolicyName: 'Microsoft.DefaultV2'
+    mode: 'Default'
+    contentFilters: [
+      {
+        name: 'Hate'
+        source: 'Prompt'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'Sexual'
+        source: 'Prompt'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'Violence'
+        source: 'Prompt'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'SelfHarm'
+        source: 'Prompt'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'Hate'
+        source: 'Completion'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'Sexual'
+        source: 'Completion'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'Violence'
+        source: 'Completion'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+      {
+        name: 'SelfHarm'
+        source: 'Completion'
+        enabled: true
+        blocking: true
+        severityThreshold: 'Medium'
+      }
+    ]
+  }
+  dependsOn: [
+    foundryAccount
+  ]
+}
+
+// native-bicep-fallback: The selected Cognitive Services account AVM does not expose custom RAI policy creation or deployment policy binding.
+resource foundryModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01-preview' = if (deployFoundry) {
+  parent: foundryAccountResource
+  name: modelDeploymentName
+  sku: {
+    name: modelSkuName
+    capacity: modelCapacity
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: modelName
+      version: modelVersion
+    }
+    raiPolicyName: raiPolicyName
+    versionUpgradeOption: 'NoAutoUpgrade'
+  }
+  dependsOn: [
+    contentPolicy
+  ]
 }
 
 // native-bicep-fallback: The Cognitive Services account AVM does not create Foundry project child resources; the available Foundry pattern module replaces the approved user-assigned identity design with system-assigned identities.
@@ -182,6 +264,8 @@ output openAiEndpoint string = 'https://${deployFoundry ? foundryAccount.outputs
 output applicationIdentityClientId string = applicationIdentity.outputs.clientId
 output applicationIdentityPrincipalId string = applicationIdentity.outputs.principalId
 output applicationIdentityResourceId string = applicationIdentity.outputs.resourceId
+output raiPolicyName string = raiPolicyName
+output raiPolicyVersion string = raiPolicyVersion
 @secure()
 output applicationInsightsConnectionString string = applicationInsights.outputs.connectionString
 output applicationInsightsResourceId string = applicationInsights.outputs.resourceId

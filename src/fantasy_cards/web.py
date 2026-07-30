@@ -45,6 +45,7 @@ from fantasy_cards.domain import (
     GenerationJob,
     is_valid_owner_subject,
 )
+from fantasy_cards.content_policy import ContentPolicyRejected
 from fantasy_cards.telemetry import (
     configure_telemetry,
     record_generation_outcome,
@@ -158,12 +159,14 @@ class WebRuntime:
         auth_settings: AuthSettings | None,
         oidc_client: OidcClient | None,
         configuration_error: bool,
+        configuration_error_message: str | None = None,
     ) -> None:
         self.application = application
         self.settings = settings
         self.auth_settings = auth_settings
         self.oidc_client = oidc_client
         self.configuration_error = configuration_error
+        self.configuration_error_message = configuration_error_message
         self.generation_slot = BoundedSemaphore(1)
         self.rate_limiter = RollingRateLimiter(
             settings.rate_limit_attempts if settings else 10,
@@ -179,6 +182,7 @@ def create_app(
     oidc_client: OidcClient | None = None,
 ) -> FastAPI:
     configuration_error = False
+    configuration_error_message: str | None = None
     try:
         resolved_web_settings = (web_settings or WebSettings.from_environment()).validated()
         resolved_auth_settings = (
@@ -189,12 +193,23 @@ def create_app(
             web_settings=resolved_web_settings,
         )
         resolved_oidc_client = oidc_client or AuthlibOidcClient(resolved_auth_settings)
-    except (AuthenticationConfigurationError, ConfigurationError, ValueError):
+    except (AuthenticationConfigurationError, ConfigurationError, ValueError) as error:
         resolved_web_settings = None
         resolved_auth_settings = None
         resolved_application = None
         resolved_oidc_client = None
         configuration_error = True
+        configuration_error_message = str(error)
+        _LOGGER.error(
+            json.dumps(
+                {
+                    "event": "startup_configuration_failed",
+                    "component": "runtime",
+                    "error_code": "configuration_error",
+                },
+                separators=(",", ":"),
+            )
+        )
 
     runtime = WebRuntime(
         resolved_application,
@@ -202,6 +217,7 @@ def create_app(
         resolved_auth_settings,
         resolved_oidc_client,
         configuration_error,
+        configuration_error_message,
     )
     templates = Environment(
         loader=FileSystemLoader(_PACKAGE_DIRECTORY / "templates"),
@@ -395,10 +411,27 @@ def create_app(
     @application_host.get("/health/ready")
     async def readiness() -> JSONResponse:
         if runtime.configuration_error or runtime.application is None:
-            return JSONResponse({"status": "not_ready"}, status_code=503)
+            return JSONResponse(
+                {"status": "not_ready", "reason": "configuration_error"},
+                status_code=503,
+            )
         return JSONResponse({"status": "ready"}, status_code=200)
 
-    configure_telemetry(application_host)
+    try:
+        configure_telemetry(application_host)
+    except ValueError as error:
+        runtime.configuration_error = True
+        runtime.configuration_error_message = str(error)
+        _LOGGER.error(
+            json.dumps(
+                {
+                    "event": "startup_configuration_failed",
+                    "component": "telemetry",
+                    "error_code": "configuration_error",
+                },
+                separators=(",", ":"),
+            )
+        )
     return application_host
 
 
@@ -440,6 +473,9 @@ async def _generate(
             job.artifact.size_bytes,
         )
         return job
+    except ContentPolicyRejected as error:
+        _log_outcome(correlation_id, error.code, monotonic() - started_at)
+        raise WebError(error.code, 422) from None
     except ImageGenerationError as error:
         _log_outcome(correlation_id, error.code, monotonic() - started_at)
         raise _image_error(error.code) from None
@@ -562,6 +598,9 @@ def _render_error(
     description: str = "",
     retry_after: int | None = None,
 ) -> HTMLResponse:
+    if code == "content_policy_rejected":
+        title = ""
+        description = ""
     response = _render(
         request,
         title=title if isinstance(title, str) else "",
@@ -603,6 +642,11 @@ def _message(code: str) -> str:
         "request_too_large": "The request is too large.",
         "rate_limited": "Too many generation attempts. Please try again later.",
         "busy": "A card is already being generated. Please try again shortly.",
+        "content_policy_rejected": (
+            "This request can't be used to create an image. Please describe an "
+            "original, fictional subject without real people, protected characters "
+            "or brands, named artists, or any depiction of minors."
+        ),
         "safety_rejected": "This description could not be generated. Revise it and try again.",
         "provider_timeout": "Card generation took too long. Please try again.",
         "provider_unavailable": "Card generation is temporarily unavailable.",

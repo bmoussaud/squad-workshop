@@ -37,10 +37,37 @@ Production enforcement is a required combination:
 3. **Provider safety filtering** remains enabled as defense in depth. A provider
    acceptance never overrides an application-policy rejection.
 
-The current application has no product-specific validator or denylist and uses
-the provider's default policy only. It therefore does **not** yet enforce this
-policy. Production is blocked on the dedicated enforcement implementation
-issue filed for Tank. That work must be reviewed by Rai before release.
+The application enforces this policy in `GenerationService` before idempotency
+lookup, artifact writes, or any image-generator/provider call. The validator
+normalizes Unicode, strips zero-width formatting characters, and compares both
+normalized and compacted forms to resist simple spacing and leetspeak evasion.
+It is intentionally a conservative product boundary, not a claim that lexical
+matching alone solves semantic or multilingual content classification.
+
+## Foundry RAI Policy Configuration
+
+The Bicep deployment defines and binds `fantasy-cards-content-policy-v1`
+(repository configuration version `1`) to a newly provisioned image deployment.
+It inherits `Microsoft.DefaultV2` and retains blocking Medium thresholds for
+Hate, Sexual, Violence, and Self-harm on both prompt and completion paths.
+The deployed Container Apps receive the non-secret
+`FANTASY_CARD_RAI_POLICY_NAME` and `FANTASY_CARD_RAI_POLICY_VERSION` values;
+Foundry-mode application composition refuses to start if either is missing.
+
+### Operational Verification and Updates
+
+This repository cannot prove the state of a live Foundry resource. Before a
+production release, an authorized operator must verify that the target account
+contains policy `fantasy-cards-content-policy-v1`, that the target deployment's
+`raiPolicyName` is exactly that value, and that the policy's blocking filters
+match this document. Record the non-secret policy/deployment identifiers and
+verification timestamp in the release evidence; do not record prompts,
+credentials, or endpoint secrets.
+
+To update the policy, create a new versioned policy name, update the Bicep
+parameter/default and app configuration together, run the adversarial suite,
+preview the deployment, bind the new policy to the deployment, then repeat the
+operational verification. Do not change an existing version in place.
 
 ## User-Facing Refusal
 

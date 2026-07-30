@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from uuid import UUID
 
 from fantasy_cards.adapters import (
     BlobArtifactStore,
@@ -38,11 +39,38 @@ class ConfigurationError(ValueError):
     """A safe runtime configuration error."""
 
 
+_REJECTED_AZURE_CLIENT_IDS = {
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-4000-8000-000000000000",
+}
+
+
+def validate_azure_client_id(
+    raw_client_id: str | None, *, required: bool, context: str
+) -> str | None:
+    client_id = (raw_client_id or "").strip()
+    if not client_id:
+        if required:
+            raise ConfigurationError(
+                f"AZURE_CLIENT_ID is required for {context}."
+            )
+        return None
+    try:
+        normalized = str(UUID(client_id))
+    except ValueError:
+        raise ConfigurationError("AZURE_CLIENT_ID must be a valid GUID.") from None
+    if normalized in _REJECTED_AZURE_CLIENT_IDS:
+        raise ConfigurationError("AZURE_CLIENT_ID contains a reserved GUID value.")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class ImageGeneratorSettings:
     mode: str = "in-memory"
     endpoint: str | None = None
     deployment: str | None = None
+    rai_policy_name: str | None = None
+    rai_policy_version: str | None = None
     timeout_seconds: float = 60.0
 
     @classmethod
@@ -61,6 +89,8 @@ class ImageGeneratorSettings:
             mode=values.get("FANTASY_CARD_IMAGE_GENERATOR", "in-memory"),
             endpoint=values.get("AZURE_OPENAI_ENDPOINT"),
             deployment=values.get("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            rai_policy_name=values.get("FANTASY_CARD_RAI_POLICY_NAME"),
+            rai_policy_version=values.get("FANTASY_CARD_RAI_POLICY_VERSION"),
             timeout_seconds=timeout_seconds,
         ).validated()
 
@@ -78,9 +108,13 @@ class ImageGeneratorSettings:
             or not self.endpoint.strip()
             or not self.deployment
             or not self.deployment.strip()
+            or not self.rai_policy_name
+            or not self.rai_policy_name.strip()
+            or not self.rai_policy_version
+            or not self.rai_policy_version.strip()
         ):
             raise ConfigurationError(
-                "Foundry image generation configuration is incomplete."
+                "Foundry image generation and RAI policy configuration is incomplete."
             )
         if self.mode == "foundry":
             try:
@@ -156,6 +190,12 @@ def build_local_application(
 ) -> LocalApplication:
     settings = (settings or ImageGeneratorSettings.from_environment()).validated()
     client_factory = client_factory or create_foundry_client
+    if settings.mode == "foundry":
+        validate_azure_client_id(
+            os.environ.get("AZURE_CLIENT_ID"),
+            required=True,
+            context="foundry image generation",
+        )
     artifact_store = InMemoryArtifactStore(
         output_directory or os.environ.get("FANTASY_CARD_OUTPUT_DIR", "artifacts")
     )
@@ -189,6 +229,14 @@ def build_web_application(
         image_settings or ImageGeneratorSettings.from_environment()
     ).validated()
     web_settings = (web_settings or WebSettings.from_environment()).validated()
+    requires_azure_identity = (
+        image_settings.mode == "foundry" or web_settings.artifact_store == "blob"
+    )
+    validate_azure_client_id(
+        os.environ.get("AZURE_CLIENT_ID"),
+        required=requires_azure_identity,
+        context="Azure-backed web runtime",
+    )
     client_factory = client_factory or create_foundry_client
 
     artifact_store: ArtifactStore

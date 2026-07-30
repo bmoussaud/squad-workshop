@@ -96,6 +96,9 @@ class DeploymentContractTests(unittest.TestCase):
         cls.foundry_bicep = (REPOSITORY_ROOT / "infra/foundry.bicep").read_text(
             encoding="utf-8"
         )
+        cls.content_policy = (
+            REPOSITORY_ROOT / "docs/policies/content-policy.md"
+        ).read_text(encoding="utf-8")
         cls.azure_deployment_design = (
             REPOSITORY_ROOT / "docs/design/azure-deployment.md"
         ).read_text(encoding="utf-8")
@@ -171,6 +174,22 @@ class DeploymentContractTests(unittest.TestCase):
             direct_resources,
             "Each direct resource must have one documented native-Bicep fallback rationale",
         )
+
+    def test_custom_rai_policy_is_bound_and_versioned(self) -> None:
+        self.assertIn(
+            "resource contentPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies",
+            self.foundry_bicep,
+        )
+        self.assertIn("basePolicyName: 'Microsoft.DefaultV2'", self.foundry_bicep)
+        self.assertIn("raiPolicyName: raiPolicyName", self.foundry_bicep)
+        self.assertIn("raiPolicyVersion", self.foundry_bicep)
+        for variable in (
+            "FANTASY_CARD_RAI_POLICY_NAME",
+            "FANTASY_CARD_RAI_POLICY_VERSION",
+        ):
+            self.assertGreaterEqual(self.web_bicep.count(variable), 2)
+        self.assertIn("fantasy-cards-content-policy-v1", self.content_policy)
+        self.assertIn("operational verification", self.content_policy.lower())
 
     def test_azd_declares_only_the_approved_web_container_app_service(self) -> None:
         self.assertEqual(self.azure["name"], "fantasy-cards")

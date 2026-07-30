@@ -2,6 +2,7 @@
 
 from uuid import uuid4
 
+from fantasy_cards.content_policy import validate_generation_request
 from fantasy_cards.domain import CardGenerationRequest, GenerationJob, JobStatus
 from fantasy_cards.ports import ArtifactStore, ImageGenerator, JobRepository
 
@@ -18,6 +19,7 @@ class GenerationService:
         self._job_repository = job_repository
 
     def generate(self, request: CardGenerationRequest) -> GenerationJob:
+        validate_generation_request(request.title, request.prompt)
         existing_job = self._job_repository.get_by_idempotency_key(
             request.owner_subject, request.idempotency_key
         )

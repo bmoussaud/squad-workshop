@@ -94,6 +94,12 @@ param alertContactEmails array
 
 @description('Enable application-signal log alerts only after Azure Validate confirms telemetry tables and queries.')
 param enableApplicationSignalAlerts bool = false
+@description('Enable Container Apps built-in Entra authentication. Keep false unless auth app client id and tenant id are configured.')
+param enableContainerAppsAuth bool = false
+@description('Entra app registration client id used by Container Apps auth for user sign-in.')
+param entraAuthClientId string = ''
+@description('Tenant id used to build the Entra OpenID issuer for Container Apps auth.')
+param entraAuthTenantId string = ''
 
 @description('Single Entra tenant used by the in-application OIDC flow.')
 param oidcTenantId string
@@ -212,6 +218,8 @@ module web 'web.bicep' = {
     logAnalyticsWorkspaceResourceId: foundry.outputs.logAnalyticsWorkspaceResourceId
     openAiEndpoint: foundry.outputs.openAiEndpoint
     modelDeploymentName: modelDeploymentName
+    raiPolicyName: foundry.outputs.raiPolicyName
+    raiPolicyVersion: foundry.outputs.raiPolicyVersion
     workloadProfileType: workloadProfileType
     workloadProfileMinimumCount: workloadProfileMinimumCount
     workloadProfileMaximumCount: workloadProfileMaximumCount
@@ -221,6 +229,9 @@ module web 'web.bicep' = {
     budgetStartDate: budgetStartDate
     alertContactEmails: alertContactEmails
     enableApplicationSignalAlerts: enableApplicationSignalAlerts
+    enableContainerAppsAuth: enableContainerAppsAuth
+    entraAuthClientId: entraAuthClientId
+    entraAuthTenantId: entraAuthTenantId
     oidcTenantId: oidcTenantId
     oidcClientId: oidcClientId
     oidcClientSecret: oidcClientSecret

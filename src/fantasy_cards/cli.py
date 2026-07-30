@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from fantasy_cards.adapters import ImageGenerationError, deterministic_idempotency_key
 from fantasy_cards.config import ConfigurationError, build_local_application
+from fantasy_cards.content_policy import ContentPolicyRejected
 from fantasy_cards.domain import CardGenerationRequest
 
 
@@ -32,7 +33,7 @@ def main() -> int:
     )
     try:
         job = build_local_application().service.generate(request)
-    except (ConfigurationError, ImageGenerationError) as error:
+    except (ConfigurationError, ContentPolicyRejected, ImageGenerationError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
     print(json.dumps(asdict(job), indent=2))

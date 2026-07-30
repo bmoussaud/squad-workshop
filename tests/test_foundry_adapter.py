@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import unittest
 from io import BytesIO
 from types import SimpleNamespace
@@ -37,9 +38,8 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         credential = credential_type.return_value
         token_provider = token_provider_factory.return_value
 
-        client = create_foundry_client(
-            "https://example.openai.azure.com/", 45.0
-        )
+        with patch.dict(os.environ, {}, clear=True):
+            client = create_foundry_client("https://example.openai.azure.com/", 45.0)
 
         self.assertIs(client, openai_type.return_value)
         credential_type.assert_called_once_with()
@@ -75,10 +75,11 @@ class FoundryImageGeneratorTests(unittest.TestCase):
                 },
             )
 
-        client = create_foundry_client(
-            "https://foundry-j7hqwc4422gp4.services.ai.azure.com/openai/v1/",
-            45.0,
-        )
+        with patch.dict(os.environ, {}, clear=True):
+            client = create_foundry_client(
+                "https://foundry-j7hqwc4422gp4.services.ai.azure.com/openai/v1/",
+                45.0,
+            )
         client._client._transport = httpx.MockTransport(handle_request)
 
         client.images.generate(
@@ -103,6 +104,30 @@ class FoundryImageGeneratorTests(unittest.TestCase):
         token_provider_factory.assert_called_once_with(
             credential_type.return_value, "https://ai.azure.com/.default"
         )
+
+    @patch("openai.OpenAI")
+    @patch("azure.identity.get_bearer_token_provider")
+    @patch("azure.identity.DefaultAzureCredential")
+    def test_client_uses_managed_identity_client_id_when_configured(
+        self,
+        credential_type: Mock,
+        token_provider_factory: Mock,
+        openai_type: Mock,
+    ) -> None:
+        token_provider_factory.return_value = Mock()
+
+        with patch.dict(
+            os.environ,
+            {"AZURE_CLIENT_ID": "11111111-2222-4333-8444-555555555555"},
+            clear=True,
+        ):
+            create_foundry_client("https://example.openai.azure.com/", 45.0)
+
+        credential_type.assert_called_once_with(
+            managed_identity_client_id="11111111-2222-4333-8444-555555555555"
+        )
+        self.assertTrue(token_provider_factory.called)
+        self.assertTrue(openai_type.called)
 
     @patch("openai.OpenAI")
     @patch("azure.identity.DefaultAzureCredential")
