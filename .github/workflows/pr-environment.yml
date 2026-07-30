@@ -318,7 +318,6 @@ jobs:
           SHARED_FOUNDRY_PROJECT_NAME: ${{ vars.SHARED_FOUNDRY_PROJECT_NAME }}
           SHARED_FOUNDRY_RESOURCE_GROUP_NAME: ${{ vars.SHARED_FOUNDRY_RESOURCE_GROUP_NAME }}
           MODEL_DEPLOYMENT_NAME: ${{ vars.SHARED_MODEL_DEPLOYMENT_NAME }}
-          ENTRA_AUTH_CLIENT_ID: ${{ vars.ENTRA_AUTH_CLIENT_ID }}
           ALERT_CONTACT_EMAILS: ${{ vars.AZURE_ALERT_CONTACT_EMAILS }}
           FOUNDRY_AUTHORIZED: ${{ needs.foundry_exception.outputs.authorized == 'true' && 'true' || 'false' }}
         run: |
@@ -336,10 +335,9 @@ jobs:
             echo "SHARED_FOUNDRY_PROJECT_NAME=${SHARED_FOUNDRY_PROJECT_NAME}"
             echo "SHARED_FOUNDRY_RESOURCE_GROUP_NAME=${SHARED_FOUNDRY_RESOURCE_GROUP_NAME}"
             echo "MODEL_DEPLOYMENT_NAME=${MODEL_DEPLOYMENT_NAME}"
-            echo "ENABLE_CONTAINER_APPS_AUTH=true"
-            echo "ENTRA_AUTH_CLIENT_ID=${ENTRA_AUTH_CLIENT_ID}"
-            echo "ENTRA_AUTH_TENANT_ID=${AZURE_TENANT_ID}"
+            echo "ENABLE_CONTAINER_APPS_AUTH=false"
           } >> "$GITHUB_ENV"
+          echo "::notice::Built-in Container Apps auth is disabled for PR environments; trusted per-PR application OIDC is installed after provisioning."
 
           # Minimum-viable values for the infra inputs main.bicepparam requires
           # with no default. These are just enough to let `azd provision` run for
@@ -363,27 +361,6 @@ jobs:
             echo "FANTASY_CARD_SESSION_SECRET_PREVIOUS=provisioning-placeholder-previous-000"
             echo "FANTASY_CARD_EXTERNAL_INGRESS=false"
           } >> "$GITHUB_ENV"
-
-      - name: Validate Entra auth app wiring
-        env:
-          ENTRA_AUTH_CLIENT_ID: ${{ vars.ENTRA_AUTH_CLIENT_ID }}
-          AZURE_OIDC_CLIENT_ID: ${{ env.AZURE_OIDC_CLIENT_ID }}
-        run: |
-          set -euo pipefail
-          sentinel_client_id="00000000-0000-4000-8000-000000000000"
-          if [ -z "${ENTRA_AUTH_CLIENT_ID}" ]; then
-            echo "::error::Missing repository variable ENTRA_AUTH_CLIENT_ID. Container Apps Entra auth is required for PR protected-endpoint access."
-            exit 1
-          fi
-          if [ "${ENTRA_AUTH_CLIENT_ID}" = "${sentinel_client_id}" ]; then
-            echo "::error::ENTRA_AUTH_CLIENT_ID is the invalid sentinel ${sentinel_client_id} (AADSTS700016). Set it to the real Entra app registration client id."
-            exit 1
-          fi
-          if [ "${ENTRA_AUTH_CLIENT_ID}" = "${AZURE_OIDC_CLIENT_ID}" ]; then
-            echo "::error::ENTRA_AUTH_CLIENT_ID must be the runtime Entra auth app id, not the workflow OIDC id (${AZURE_OIDC_CLIENT_ID})."
-            exit 1
-          fi
-          echo "Entra auth app wiring validated."
 
       - name: azd auth login (OIDC, no stored secrets)
         run: |
@@ -705,7 +682,7 @@ jobs:
   configure_auth:
     name: Configure trusted PR authentication
     needs: [preflight, deploy]
-    if: ${{ needs.preflight.outputs.eligible == 'true' && needs.deploy.result == 'success' }}
+    if: ${{ needs.deploy.result == 'success' }}
     runs-on: ubuntu-latest
     environment: azure-pr-app
     permissions:

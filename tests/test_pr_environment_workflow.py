@@ -123,6 +123,8 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         self.assertIn("Smoke test (/health/live + /health/ready)", configure_auth_job)
         # configure_auth must depend on deploy completing successfully
         self.assertIn("needs: [preflight, deploy]", configure_auth_job)
+        self.assertIn("if: ${{ needs.deploy.result == 'success' }}", configure_auth_job)
+        self.assertNotIn("needs.preflight.outputs.eligible", configure_auth_job)
 
     def test_resource_group_is_tagged_before_azd_provision(self) -> None:
         create_block = _step_block(self.workflow, "Create and atomically tag PR resource group")
@@ -207,6 +209,13 @@ class PrEnvironmentWorkflowTests(unittest.TestCase):
         )
         self.assertIn("FANTASY_CARD_EXTERNAL_INGRESS=false", inputs)
         self.assertIn("provisioning-placeholder-only", inputs)
+        self.assertIn("ENABLE_CONTAINER_APPS_AUTH=false", inputs)
+        self.assertIn(
+            "trusted per-PR application OIDC is installed after provisioning", inputs
+        )
+        deploy_job = _job_block(self.workflow, "deploy")
+        self.assertNotIn("ENTRA_AUTH_CLIENT_ID", deploy_job)
+        self.assertNotIn("Validate Entra auth app wiring", deploy_job)
         configure_index = self.workflow.index("  configure_auth:")
         self.assertLess(
             self.workflow.index("- name: azd provision"),

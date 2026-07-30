@@ -72,10 +72,6 @@ var privateEndpointName = 'pe-${storageAccountNameEffective}-blob'
 var privateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var resolvedSharedContainerRegistryResourceGroupName = empty(sharedContainerRegistryResourceGroupName) ? resourceGroup().name : sharedContainerRegistryResourceGroupName
 var containerAppsWorkloadProfileName = workloadProfileType == 'Consumption' ? 'Consumption' : 'dedicated'
-var aadAuthSentinelClientId = '00000000-0000-4000-8000-000000000000'
-var hasValidEntraAuthClientId = !empty(entraAuthClientId) && toLower(entraAuthClientId) != aadAuthSentinelClientId
-var hasValidEntraAuthTenantId = !empty(entraAuthTenantId)
-var enableAcaAuthConfig = enableContainerAppsAuth && hasValidEntraAuthClientId && hasValidEntraAuthTenantId
 var entraOpenIdIssuer = '${environment().authentication.loginEndpoint}${entraAuthTenantId}/v2.0'
 var containerAppsWorkloadProfile = workloadProfileType == 'Consumption' ? {
 	name: containerAppsWorkloadProfileName
@@ -688,7 +684,7 @@ resource privateContainerAppResource 'Microsoft.App/containerApps@2024-10-02-pre
 }
 
 // native-bicep-fallback: The selected Container App AVM module does not expose authConfig identity-provider wiring, so auth is configured explicitly on the deployed app.
-resource containerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = if (enableAcaAuthConfig) {
+resource containerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = if (enableContainerAppsAuth) {
 	name: 'current'
 	parent: containerAppResource
 	properties: {
@@ -697,6 +693,10 @@ resource containerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10
 		}
 		globalValidation: {
 			unauthenticatedClientAction: 'RedirectToLoginPage'
+			excludedPaths: [
+				'/health/live'
+				'/health/ready'
+			]
 		}
 		identityProviders: {
 			azureActiveDirectory: {
@@ -714,7 +714,7 @@ resource containerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10
 }
 
 // native-bicep-fallback: The selected Container App AVM module does not expose authConfig identity-provider wiring, so auth is configured explicitly on the deployed app.
-resource privateContainerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = if (enableAcaAuthConfig) {
+resource privateContainerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = if (enableContainerAppsAuth) {
 	name: 'current'
 	parent: privateContainerAppResource
 	properties: {
@@ -723,6 +723,10 @@ resource privateContainerAppAuthConfig 'Microsoft.App/containerApps/authConfigs@
 		}
 		globalValidation: {
 			unauthenticatedClientAction: 'RedirectToLoginPage'
+			excludedPaths: [
+				'/health/live'
+				'/health/ready'
+			]
 		}
 		identityProviders: {
 			azureActiveDirectory: {
