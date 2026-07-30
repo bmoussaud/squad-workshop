@@ -16,6 +16,7 @@ Key retained history:
 - 2026-07-27 #15/#20/#29: Parameterized PR Bicep names/env-var emission, added close-time teardown and daily janitor workflows, and configured secretless Azure OIDC for PR environments. Teardown/janitor deletion is tag-scoped and must fail loudly on Azure query errors.
 - 2026-07-28 #18/#17/#39/#41: Verified budget alerts and child tags, participated in Foundry exception gating/live validation, confirmed `GlobalStandard` is not EU-bound for inference, and supported the accessible green-background PR.
 - 2026-07-28 #23: Corrected the PR #14 per-PR environment worked example to the implementation-derived `hash8` value `4c32c628`. The canonical SHA-256 input is `bmoussaud/squad-workshop|14|render-card-layout`; keep `repo` explicitly documented as GitHub `owner/repo` and label `azd` and managed-environment length caps as conservative project constraints where their platforms publish no maximum.
+- 2026-07-29 post-#79 hardening: After the independent application enforcement gate merged, hardened its existing `fantasy-cards-content-policy-v1` Foundry artifact from Medium to Low blocking across Hate, Sexual, Violence, and SelfHarm for prompts and completions, added explicit Blocking mode, and pinned the deployment contract. This is Azure platform follow-up work, not authorship of the merged application gate. Live deployment remains unverified because the recorded Foundry account was absent from the active subscription; do not provision a billable replacement without approval.
 
 ## Recent Updates
 
@@ -35,4 +36,3 @@ Key retained history:
 - 2026-07-29 #61 analysis: Confirmed platform posture for artifact auth. Current host is Azure Container Apps with private Blob access via app UAMI and container-scoped Storage Blob Data Contributor; storage is private but /api/artifacts/{uuid} is app-public. Recommended server-side artifact streaming after per-user authorization, with ACA Easy Auth/Entra viable for tenant users but PR callback/app-registration friction, and app-level sessions likely simpler for MVP/consumer identity paths. Recorded decision in decisions inbox.
 
 📌 Team update (2026-07-29T10:19:41+02:00): Issue #61 design synthesis adopted the platform friction finding for Entra app registration and PR redirect URIs, while pairing it with Morpheus's Easy Auth + owner-binding recommendation and Trinity's cross-user idempotency leak discovery. — decided by Squad Coordinator
-

@@ -176,12 +176,26 @@ class DeploymentContractTests(unittest.TestCase):
         )
 
     def test_custom_rai_policy_is_bound_and_versioned(self) -> None:
+        policy = extract_bicep_block(self.foundry_bicep, "resource", "contentPolicy")
+        deployment = extract_bicep_block(
+            self.foundry_bicep, "resource", "foundryModelDeployment"
+        )
         self.assertIn(
             "resource contentPolicy 'Microsoft.CognitiveServices/accounts/raiPolicies",
             self.foundry_bicep,
         )
-        self.assertIn("basePolicyName: 'Microsoft.DefaultV2'", self.foundry_bicep)
-        self.assertIn("raiPolicyName: raiPolicyName", self.foundry_bicep)
+        self.assertIn("basePolicyName: 'Microsoft.DefaultV2'", policy)
+        self.assertIn("mode: 'Blocking'", policy)
+        for category in ("Hate", "Sexual", "Violence", "SelfHarm"):
+            self.assertEqual(policy.count(f"name: '{category}'"), 2)
+        self.assertEqual(policy.count("severityThreshold: 'Low'"), 8)
+        self.assertEqual(policy.count("blocking: true"), 8)
+        self.assertEqual(policy.count("enabled: true"), 8)
+        self.assertIn("raiPolicyName: raiPolicyName", deployment)
+        self.assertRegex(
+            deployment,
+            r"(?s)dependsOn:\s*\[\s*contentPolicy\s*\]",
+        )
         self.assertIn("raiPolicyVersion", self.foundry_bicep)
         for variable in (
             "FANTASY_CARD_RAI_POLICY_NAME",
